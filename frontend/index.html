@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fernsicht</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Landing page -->
+      <div id="landing" class="hidden">
+        <h1>Fernsicht</h1>
+        <p class="subtitle">Peer-to-peer progress tracking</p>
+        <div class="instructions">
+          <p>Open a link with <code>#room=&lt;id&gt;</code> to view progress,</p>
+          <p>or <code>#room=&lt;id&gt;&amp;role=broadcaster</code> to send.</p>
+          <pre>from fernsicht import blick
+
+for item in blick(data, desc="Working"):
+    process(item)</pre>
+          <p class="hint">A shareable link will appear in your terminal.</p>
+        </div>
+      </div>
+
+      <!-- Shared header (visible in both broadcaster and viewer) -->
+      <div id="header" class="hidden">
+        <div class="status-line">
+          <span id="connection-status" class="status connecting">connecting</span>
+          <span id="room-id" class="meta"></span>
+          <span id="peer-id" class="meta"></span>
+        </div>
+      </div>
+
+      <!-- Broadcaster view -->
+      <div id="broadcaster-view" class="hidden">
+        <h2>Broadcaster</h2>
+        <button id="mock-btn" class="mock-btn">Mock Simulation</button>
+        <div id="broadcaster-log" class="log"></div>
+      </div>
+
+      <!-- Viewer view -->
+      <div id="viewer-view" class="hidden">
+        <h2>Watching</h2>
+        <div id="bars-container"></div>
+        <p id="viewer-empty" class="hint">Waiting for progress updates...</p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

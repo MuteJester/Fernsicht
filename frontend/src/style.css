@@ -1,0 +1,240 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  background: #0d1117;
+  color: #e6edf3;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#app {
+  width: 100%;
+  max-width: 640px;
+  padding: 2rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Landing page */
+#landing {
+  text-align: center;
+}
+
+#landing h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+  background: linear-gradient(135deg, #58a6ff, #bc8cff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.subtitle {
+  color: #8b949e;
+  margin-bottom: 2rem;
+}
+
+.instructions {
+  text-align: left;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.instructions code {
+  background: #0d1117;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  color: #58a6ff;
+  font-size: 0.9rem;
+}
+
+.instructions pre {
+  background: #0d1117;
+  padding: 0.75rem;
+  border-radius: 4px;
+  margin: 1rem 0;
+  overflow-x: auto;
+  color: #e6edf3;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.instructions p {
+  margin-bottom: 0.5rem;
+}
+
+.hint {
+  color: #8b949e;
+  font-size: 0.8rem;
+}
+
+/* Header */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.status {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status.connecting {
+  background: #1a1e24;
+  color: #d29922;
+}
+
+.status.connected {
+  background: #0f1a0f;
+  color: #3fb950;
+}
+
+.status.disconnected {
+  background: #1a0f0f;
+  color: #f85149;
+}
+
+.status.signaling-error {
+  background: #1a0f0f;
+  color: #f85149;
+}
+
+.meta {
+  font-size: 0.7rem;
+  color: #8b949e;
+}
+
+/* Broadcaster */
+#broadcaster-view h2,
+#viewer-view h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.mock-btn {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 1rem;
+}
+
+.mock-btn:hover {
+  background: #30363d;
+}
+
+.mock-btn:active {
+  background: #484f58;
+}
+
+.log {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 0.75rem;
+  max-height: 400px;
+  overflow-y: auto;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.log-line {
+  color: #8b949e;
+  word-break: break-all;
+}
+
+/* Viewer: progress bars */
+#bars-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.task-bar {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 1rem;
+  transition: opacity 0.3s;
+}
+
+.task-bar.completed {
+  opacity: 0.6;
+}
+
+.task-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.progress-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 20px;
+  background: #21262d;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #58a6ff, #bc8cff);
+  border-radius: 6px;
+  transition: width 0.2s ease;
+}
+
+.progress-fill.done {
+  background: linear-gradient(90deg, #3fb950, #56d364);
+}
+
+.progress-pct {
+  min-width: 3em;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+/* Mobile */
+@media (max-width: 480px) {
+  #app {
+    padding: 1rem;
+  }
+  #landing h1 {
+    font-size: 1.8rem;
+  }
+  .log {
+    max-height: 250px;
+    font-size: 0.65rem;
+  }
+}

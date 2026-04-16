@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fernsicht"
+version = "0.1.0"
+description = "Remote progress bar tracking — wrap your loop, watch from anywhere"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [{ name = "Fernsicht Contributors" }]
+keywords = ["progress", "remote", "webrtc", "monitoring"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "aiortc>=1.14.0",
+    "aiohttp>=3.9",
+    "cryptography>=41.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/fernsicht/fernsicht"
+Repository = "https://github.com/fernsicht/fernsicht"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fernsicht"]
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
