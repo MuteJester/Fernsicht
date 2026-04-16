@@ -39,7 +39,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_SIGNALING_URL: wss://signal.fernsicht.space/ws
-          VITE_BASE_PATH: /Fernsicht/
+          VITE_BASE_PATH: /
         run: npm run build
 
       - name: Upload Pages artifact
