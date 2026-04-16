@@ -1,5 +1,7 @@
 # Fernsicht
 
+![Fernsight Icon](./.github/assets/fernsight_icon.png)
+
 Remote progress bar tracking. Wrap your loop, get a shareable URL, watch progress from anywhere.
 
 ```python
