@@ -31,6 +31,14 @@ Optional (if server requires session endpoint API key):
 export FERNSICHT_SESSION_API_KEY="your-api-key"
 ```
 
+Optional (fallback only; disabled by default):
+
+```bash
+export FERNSICHT_ALLOW_LOCAL_FALLBACK=true
+```
+
+When enabled, failed session bootstrap falls back to local room generation.
+
 ## Usage
 
 ```python

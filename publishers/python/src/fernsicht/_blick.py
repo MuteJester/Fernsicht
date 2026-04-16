@@ -7,7 +7,7 @@ import sys
 import time
 from typing import Generic, Iterable, Iterator, TypeVar
 
-from fernsicht._crypto import generate_topic_id
+from fernsicht._room import generate_room_id
 from fernsicht._session import SessionBootstrapError, create_session, derive_session_url
 from fernsicht._transport import Transport
 from fernsicht._url import build_url
@@ -18,7 +18,20 @@ SIGNALING_URL_ENV = "FERNSICHT_SIGNALING_URL"
 SESSION_URL_ENV = "FERNSICHT_SESSION_URL"
 SESSION_API_KEY_ENV = "FERNSICHT_SESSION_API_KEY"
 SENDER_TOKEN_ENV = "FERNSICHT_SENDER_TOKEN"
+ALLOW_LOCAL_FALLBACK_ENV = "FERNSICHT_ALLOW_LOCAL_FALLBACK"
 DEFAULT_SIGNALING_URL = "wss://signal.fernsicht.space/ws"
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean (true/false)")
 
 
 class FernsichtBar(Generic[T]):
@@ -68,9 +81,9 @@ class FernsichtBar(Generic[T]):
         self._n = 0
         self._start_time = time.monotonic()
         self._closed = False
+        self._transport = None
 
         if disable:
-            self._transport = None
             self._room_id = ""
             self._url = ""
             return
@@ -80,6 +93,7 @@ class FernsichtBar(Generic[T]):
         )
         resolved_sender_token = sender_token or os.getenv(SENDER_TOKEN_ENV)
         resolved_api_key = os.getenv(SESSION_API_KEY_ENV)
+        allow_local_fallback = _env_bool(ALLOW_LOCAL_FALLBACK_ENV, False)
 
         self._room_id = ""
         self._url = ""
@@ -101,17 +115,23 @@ class FernsichtBar(Generic[T]):
                 if signaling_url is None:
                     resolved_signaling_url = session.signaling_url
             except SessionBootstrapError as exc:
-                print(
-                    (
-                        f"\n  Fernsicht session bootstrap failed ({exc}). "
-                        "Falling back to local room generation.\n"
-                    ),
-                    file=self._file,
-                    flush=True,
-                )
+                if allow_local_fallback:
+                    print(
+                        (
+                            f"\n  Fernsicht session bootstrap failed ({exc}). "
+                            "Falling back to local room generation.\n"
+                        ),
+                        file=self._file,
+                        flush=True,
+                    )
+                else:
+                    raise RuntimeError(
+                        "Fernsicht session bootstrap failed. "
+                        "Set FERNSICHT_ALLOW_LOCAL_FALLBACK=true to permit local fallback."
+                    ) from exc
 
         if not self._room_id:
-            self._room_id = generate_topic_id()
+            self._room_id = generate_room_id()
 
         if base_url:
             self._url = build_url(self._room_id, base_url=base_url)

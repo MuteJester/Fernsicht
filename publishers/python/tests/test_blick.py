@@ -1,8 +1,10 @@
-"""Tests for the blick wrapper (with MQTT disabled)."""
+"""Tests for the blick wrapper (WebRTC transport)."""
 
 import pytest
 
+import fernsicht._blick as blick_module
 from fernsicht._blick import FernsichtBar, blick, manual
+from fernsicht._session import SessionBootstrapError
 
 
 def test_blick_iterates_all_items():
@@ -105,3 +107,39 @@ def test_context_manager_exception():
             bar.update(5)
             raise ValueError("test error")
     assert bar._closed is True
+
+
+def test_bootstrap_failure_raises_by_default(monkeypatch: pytest.MonkeyPatch):
+    def _raise_session_error(*, session_url: str, timeout_sec: float = 5.0, api_key: str | None = None):
+        raise SessionBootstrapError("boom")
+
+    monkeypatch.setattr(blick_module, "create_session", _raise_session_error)
+
+    with pytest.raises(RuntimeError, match="session bootstrap failed"):
+        FernsichtBar(total=1, disable=False)
+
+
+def test_bootstrap_failure_allows_local_fallback(monkeypatch: pytest.MonkeyPatch):
+    class DummyTransport:
+        def __init__(self, *args, **kwargs):
+            self.closed = False
+
+        def post(self, **kwargs):
+            return None
+
+        def send_error(self, **kwargs):
+            return None
+
+        def close(self, **kwargs):
+            self.closed = True
+
+    def _raise_session_error(*, session_url: str, timeout_sec: float = 5.0, api_key: str | None = None):
+        raise SessionBootstrapError("boom")
+
+    monkeypatch.setenv("FERNSICHT_ALLOW_LOCAL_FALLBACK", "true")
+    monkeypatch.setattr(blick_module, "Transport", DummyTransport)
+    monkeypatch.setattr(blick_module, "create_session", _raise_session_error)
+
+    bar = FernsichtBar(total=1, disable=False)
+    assert "#room=" in bar.url
+    bar.close()
