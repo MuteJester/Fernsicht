@@ -1,22 +1,10 @@
-/** WebRTC peer connection and DataChannel management for Fernsicht. */
+/** WebRTC peer connection for Fernsicht V2 — viewer-offer-first, HTTP signaling. */
 
-import { SignalingClient, type Role } from "./signaling";
+import {
+  SenderSignaling,
+  ViewerSignaling,
+} from "./signaling";
 import { serializeKeepAlive } from "./protocol";
-
-/** SDP/ICE messages relayed through the signaling server. */
-interface SignalEnvelope {
-  to?: string;
-  from?: string;
-  type: "offer" | "answer" | "ice";
-  payload: RTCSessionDescriptionInit | RTCIceCandidateInit;
-}
-
-interface SenderPeerState {
-  viewerId: string;
-  pc: RTCPeerConnection;
-  dc: RTCDataChannel;
-  pendingIce: RTCIceCandidateInit[];
-}
 
 export interface PeerEvents {
   onOpen: () => void;
@@ -26,10 +14,6 @@ export interface PeerEvents {
   onSignalingError: (code: string, message: string, fatal: boolean) => void;
 }
 
-export interface PeerOptions {
-  senderJoinToken?: string;
-}
-
 const STUN_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
@@ -37,360 +21,158 @@ const STUN_SERVERS: RTCIceServer[] = [
 
 const KEEPALIVE_INTERVAL_MS = 20_000;
 const DATACHANNEL_LABEL = "fernsicht";
-const LEGACY_VIEWER_ID = "__legacy__";
+const ICE_POLL_INTERVAL_MS = 500;
+const ICE_POLL_MAX_ROUNDS = 30; // 15 seconds
 
-export class FernsichtPeer {
-  private viewerPc: RTCPeerConnection | null = null;
-  private viewerDc: RTCDataChannel | null = null;
-  private viewerPendingIce: RTCIceCandidateInit[] = [];
+// --- Viewer Peer ---
 
-  private senderPeers = new Map<string, SenderPeerState>();
-
-  private signaling: SignalingClient;
-  private readonly events: PeerEvents;
-  private readonly role: Role;
+export class ViewerPeer {
+  private pc: RTCPeerConnection;
+  private dc: RTCDataChannel | null = null;
+  private signaling: ViewerSignaling;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private icePollTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingICE: RTCIceCandidateInit[] = [];
+  private iceSendSeq = 0;
+  private iceRecvSeq = 0;
+  private closed = false;
 
   constructor(
-    signalingUrl: string,
-    roomId: string,
-    role: Role,
-    events: PeerEvents,
-    options: PeerOptions = {},
+    baseURL: string,
+    private readonly roomId: string,
+    private readonly events: PeerEvents,
   ) {
-    this.role = role;
-    this.events = events;
-
-    this.signaling = new SignalingClient(
-      signalingUrl,
-      roomId,
-      role,
-      {
-        onOpen: () => {
-          events.onStateChange("signaling-joined");
-        },
-        onSignal: (data) => this.handleSignal(data),
-        onError: (err) => {
-          events.onStateChange("signaling-error");
-          events.onSignalingError(err.code, err.message, err.fatal);
-        },
-        onClose: () => {
-          events.onStateChange("signaling-closed");
-        },
+    this.pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+    this.signaling = new ViewerSignaling(baseURL, {
+      onAnswer: (answer) => this.handleAnswer(answer),
+      onError: (msg, fatal) => {
+        events.onSignalingError("SIGNALING", msg, fatal);
+        if (fatal) events.onStateChange("signaling-error");
       },
-      options,
-    );
+      onQueued: () => events.onStateChange("queued"),
+    });
 
-    if (role === "VIEWER") {
-      this.initViewerPeer();
-    }
+    this.setupPeerConnection();
   }
 
-  /** Start the connection: connect to signaling, begin WebRTC negotiation. */
-  start(): void {
+  async start(): Promise<void> {
     this.events.onStateChange("connecting");
-    this.signaling.connect();
+
+    // Viewer creates the DataChannel and the offer
+    this.dc = this.pc.createDataChannel(DATACHANNEL_LABEL, { ordered: true });
+    this.setupDataChannel(this.dc);
+
+    const offer = await this.pc.createOffer();
+    await this.pc.setLocalDescription(offer);
+
+    const success = await this.signaling.watch(this.roomId, this.pc.localDescription!);
+    if (!success) {
+      this.events.onStateChange("signaling-error");
+    }
   }
 
-  /** Send a string through the DataChannel. */
   send(data: string): void {
-    if (this.role === "SENDER") {
-      for (const state of this.senderPeers.values()) {
-        if (state.dc.readyState === "open") {
-          state.dc.send(data);
-        }
-      }
-      return;
-    }
-
-    if (this.viewerDc?.readyState === "open") {
-      this.viewerDc.send(data);
+    if (this.dc?.readyState === "open") {
+      this.dc.send(data);
     }
   }
 
-  /** Tear down everything. */
   close(): void {
+    this.closed = true;
     this.stopKeepAlive();
-    this.closeViewerPeer();
-    for (const state of this.senderPeers.values()) {
-      state.dc.close();
-      state.pc.close();
-    }
-    this.senderPeers.clear();
-    this.signaling.close();
+    this.stopICEPoll();
+    this.signaling.stop();
+    this.dc?.close();
+    this.pc.close();
   }
 
-  // --- Private ---
-
-  private initViewerPeer(): void {
-    const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
-    this.viewerPc = pc;
-
-    pc.onicecandidate = (ev) => {
+  private setupPeerConnection(): void {
+    this.pc.onicecandidate = (ev) => {
       if (!ev.candidate) return;
-      this.signaling.send(
-        JSON.stringify({ type: "ice", payload: ev.candidate.toJSON() }),
-      );
+      this.pendingICE.push(ev.candidate.toJSON());
+      this.flushViewerICE();
     };
 
-    pc.onconnectionstatechange = () => {
-      this.events.onStateChange(pc.connectionState);
-      if (
-        pc.connectionState === "disconnected" ||
-        pc.connectionState === "failed" ||
-        pc.connectionState === "closed"
-      ) {
+    this.pc.onconnectionstatechange = () => {
+      const state = this.pc.connectionState;
+      this.events.onStateChange(state);
+      if (state === "disconnected" || state === "failed" || state === "closed") {
         this.stopKeepAlive();
+        this.stopICEPoll();
         this.events.onClose();
       }
     };
-
-    pc.ondatachannel = (ev) => {
-      this.setupViewerDataChannel(ev.channel);
-    };
   }
 
-  private closeViewerPeer(): void {
-    this.viewerDc?.close();
-    this.viewerDc = null;
-    this.viewerPc?.close();
-    this.viewerPc = null;
-    this.viewerPendingIce = [];
-  }
-
-  private setupViewerDataChannel(channel: RTCDataChannel): void {
-    this.viewerDc = channel;
-
-    channel.onopen = () => {
+  private setupDataChannel(dc: RTCDataChannel): void {
+    dc.onopen = () => {
       this.events.onOpen();
       this.events.onStateChange("connected");
       this.startKeepAlive();
+      this.stopICEPoll(); // handshake done
     };
-
-    channel.onmessage = (ev) => {
+    dc.onmessage = (ev) => {
       this.events.onMessage(typeof ev.data === "string" ? ev.data : "");
     };
-
-    channel.onclose = () => {
-      this.viewerDc = null;
+    dc.onclose = () => {
+      this.dc = null;
       this.stopKeepAlive();
       this.events.onClose();
     };
   }
 
-  private async createSenderPeer(viewerId: string): Promise<SenderPeerState> {
-    const prev = this.senderPeers.get(viewerId);
-    if (prev) {
-      prev.dc.close();
-      prev.pc.close();
-      this.senderPeers.delete(viewerId);
-    }
-
-    const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
-    const dc = pc.createDataChannel(DATACHANNEL_LABEL, { ordered: true });
-
-    const state: SenderPeerState = {
-      viewerId,
-      pc,
-      dc,
-      pendingIce: [],
-    };
-
-    pc.onicecandidate = (ev) => {
-      if (!ev.candidate) return;
-      this.signaling.send(
-        JSON.stringify({
-          to: viewerId,
-          type: "ice",
-          payload: ev.candidate.toJSON(),
-        }),
-      );
-    };
-
-    pc.onconnectionstatechange = () => {
-      const status = pc.connectionState;
-      if (status === "failed" || status === "closed") {
-        this.senderPeers.delete(viewerId);
-        this.updateSenderAggregateState();
-      }
-    };
-
-    dc.onopen = () => {
-      this.events.onOpen();
-      this.updateSenderAggregateState();
-      this.startKeepAlive();
-    };
-
-    dc.onmessage = (ev) => {
-      this.events.onMessage(typeof ev.data === "string" ? ev.data : "");
-    };
-
-    dc.onclose = () => {
-      this.senderPeers.delete(viewerId);
-      this.updateSenderAggregateState();
-      if (!this.anyOpenSenderChannel()) {
-        this.stopKeepAlive();
-        this.events.onClose();
-      }
-    };
-
-    this.senderPeers.set(viewerId, state);
-    this.updateSenderAggregateState();
-    return state;
-  }
-
-  private async createOfferForViewer(viewerId: string): Promise<void> {
-    const state = this.senderPeers.get(viewerId);
-    if (!state) return;
-
-    const offer = await state.pc.createOffer();
-    await state.pc.setLocalDescription(offer);
-    this.signaling.send(
-      JSON.stringify({
-        to: viewerId,
-        type: "offer",
-        payload: state.pc.localDescription,
-      }),
-    );
-  }
-
-  private async handleSignal(raw: string): Promise<void> {
-    if (this.role === "SENDER" && raw.startsWith("READY")) {
-      const viewerId = this.parseReadyViewerId(raw);
-      if (viewerId) {
-        try {
-          await this.createSenderPeer(viewerId);
-          await this.createOfferForViewer(viewerId);
-        } catch (err) {
-          console.error("[peer] failed to create offer for viewer:", viewerId, err);
-        }
-      }
-      return;
-    }
-
-    let msg: SignalEnvelope;
+  private async handleAnswer(answer: RTCSessionDescriptionInit): Promise<void> {
     try {
-      msg = JSON.parse(raw) as SignalEnvelope;
-    } catch {
-      console.warn("[peer] ignoring non-JSON signaling message:", raw);
-      return;
-    }
-
-    if (msg.type === "offer") {
-      await this.handleOffer(msg);
-      return;
-    }
-    if (msg.type === "answer") {
-      await this.handleAnswer(msg);
-      return;
-    }
-    if (msg.type === "ice") {
-      await this.handleIce(msg);
+      await this.pc.setRemoteDescription(new RTCSessionDescription(answer));
+      // Start polling for sender's ICE candidates
+      this.startICEPoll();
+    } catch (err) {
+      console.error("[viewer-peer] failed to set remote description:", err);
     }
   }
 
-  private async handleOffer(msg: SignalEnvelope): Promise<void> {
-    if (this.role !== "VIEWER") return;
-    if (this.viewerPc === null) return;
-    if (this.viewerPc.currentRemoteDescription !== null) {
-      console.warn("[peer] ignoring duplicate offer");
-      return;
-    }
-
-    await this.viewerPc.setRemoteDescription(
-      new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit),
-    );
-    await this.flushPendingIceForViewer();
-    const answer = await this.viewerPc.createAnswer();
-    await this.viewerPc.setLocalDescription(answer);
-    this.signaling.send(
-      JSON.stringify({ type: "answer", payload: this.viewerPc.localDescription }),
-    );
+  private async flushViewerICE(): Promise<void> {
+    if (this.pendingICE.length === 0) return;
+    const batch = [...this.pendingICE];
+    this.pendingICE = [];
+    await this.signaling.postViewerICE(batch);
+    this.iceSendSeq += batch.length;
   }
 
-  private async handleAnswer(msg: SignalEnvelope): Promise<void> {
-    if (this.role !== "SENDER") return;
-    const viewerId = this.resolveSenderTarget(msg);
-    if (!viewerId) return;
-    const state = this.senderPeers.get(viewerId);
-    if (!state) return;
-
-    if (state.pc.currentRemoteDescription !== null) {
-      console.warn("[peer] ignoring duplicate answer");
-      return;
-    }
-    await state.pc.setRemoteDescription(
-      new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit),
-    );
-    await this.flushPendingIceForSender(state);
-  }
-
-  private async handleIce(msg: SignalEnvelope): Promise<void> {
-    if (this.role === "VIEWER") {
-      if (this.viewerPc === null) return;
-      const candidate = msg.payload as RTCIceCandidateInit;
-      if (this.viewerPc.remoteDescription === null) {
-        this.viewerPendingIce.push(candidate);
-        return;
+  private startICEPoll(): void {
+    if (this.icePollTimer !== null) return;
+    let rounds = 0;
+    const poll = async () => {
+      if (this.closed || rounds >= ICE_POLL_MAX_ROUNDS) return;
+      rounds++;
+      const resp = await this.signaling.getSenderICE(this.iceRecvSeq);
+      if (resp && resp.candidates.length > 0) {
+        for (const c of resp.candidates) {
+          try {
+            await this.pc.addIceCandidate(new RTCIceCandidate(c));
+          } catch (err) {
+            console.warn("[viewer-peer] failed to add ICE candidate:", err);
+          }
+        }
+        this.iceRecvSeq = resp.seq;
       }
-      await this.safeAddIceCandidate(this.viewerPc, candidate);
-      return;
-    }
-
-    const viewerId = this.resolveSenderTarget(msg);
-    if (!viewerId) return;
-    const state = this.senderPeers.get(viewerId);
-    if (!state) return;
-    const candidate = msg.payload as RTCIceCandidateInit;
-    if (state.pc.remoteDescription === null) {
-      state.pendingIce.push(candidate);
-      return;
-    }
-    await this.safeAddIceCandidate(state.pc, candidate);
+      if (!this.closed) {
+        this.icePollTimer = setTimeout(poll, ICE_POLL_INTERVAL_MS);
+      }
+    };
+    poll();
   }
 
-  private resolveSenderTarget(msg: SignalEnvelope): string | null {
-    if (typeof msg.from === "string" && msg.from.length > 0) {
-      return msg.from;
+  private stopICEPoll(): void {
+    if (this.icePollTimer !== null) {
+      clearTimeout(this.icePollTimer);
+      this.icePollTimer = null;
     }
-    if (this.senderPeers.size === 1) {
-      return this.senderPeers.keys().next().value as string;
-    }
-    return null;
-  }
-
-  private parseReadyViewerId(raw: string): string | null {
-    if (raw === "READY") return LEGACY_VIEWER_ID;
-    if (!raw.startsWith("READY|")) return null;
-    const viewerId = raw.slice("READY|".length).trim();
-    return viewerId.length > 0 ? viewerId : null;
-  }
-
-  private updateSenderAggregateState(): void {
-    if (this.role !== "SENDER") return;
-    if (this.anyOpenSenderChannel()) {
-      this.events.onStateChange("connected");
-      return;
-    }
-    if (this.senderPeers.size > 0) {
-      this.events.onStateChange("connecting");
-      return;
-    }
-    this.events.onStateChange("signaling-joined");
-  }
-
-  private anyOpenSenderChannel(): boolean {
-    for (const state of this.senderPeers.values()) {
-      if (state.dc.readyState === "open") return true;
-    }
-    return false;
   }
 
   private startKeepAlive(): void {
     if (this.keepAliveTimer !== null) return;
-    this.keepAliveTimer = setInterval(() => {
-      this.send(serializeKeepAlive());
-    }, KEEPALIVE_INTERVAL_MS);
+    this.keepAliveTimer = setInterval(() => this.send(serializeKeepAlive()), KEEPALIVE_INTERVAL_MS);
   }
 
   private stopKeepAlive(): void {
@@ -399,34 +181,209 @@ export class FernsichtPeer {
       this.keepAliveTimer = null;
     }
   }
+}
 
-  private async flushPendingIceForViewer(): Promise<void> {
-    if (this.viewerPc === null || this.viewerPendingIce.length === 0) return;
-    const queued = [...this.viewerPendingIce];
-    this.viewerPendingIce = [];
-    for (const candidate of queued) {
-      await this.safeAddIceCandidate(this.viewerPc, candidate);
+// --- Sender Peer ---
+
+interface SenderViewerState {
+  ticketId: string;
+  pc: RTCPeerConnection;
+  dc: RTCDataChannel | null;
+  iceRecvSeq: number;
+  icePollTimer: ReturnType<typeof setTimeout> | null;
+}
+
+export class SenderPeer {
+  private signaling: SenderSignaling;
+  private viewers = new Map<string, SenderViewerState>();
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private closed = false;
+
+  constructor(
+    baseURL: string,
+    roomId: string,
+    secret: string,
+    pollIntervalMs: number,
+    private readonly events: PeerEvents,
+  ) {
+    this.signaling = new SenderSignaling(baseURL, roomId, secret, pollIntervalMs, {
+      onTicket: (ticketId, offer) => this.handleViewerTicket(ticketId, offer),
+      onError: (msg, fatal) => {
+        events.onSignalingError("SIGNALING", msg, fatal);
+        if (fatal) events.onStateChange("signaling-error");
+      },
+      onPollOk: () => {
+        if (this.viewers.size === 0) {
+          events.onStateChange("signaling-joined");
+        }
+      },
+    });
+  }
+
+  start(): void {
+    this.events.onStateChange("connecting");
+    this.signaling.start();
+  }
+
+  send(data: string): void {
+    for (const state of this.viewers.values()) {
+      if (state.dc?.readyState === "open") {
+        state.dc.send(data);
+      }
     }
   }
 
-  private async flushPendingIceForSender(state: SenderPeerState): Promise<void> {
-    if (state.pendingIce.length === 0) return;
-    const queued = [...state.pendingIce];
-    state.pendingIce = [];
-    for (const candidate of queued) {
-      await this.safeAddIceCandidate(state.pc, candidate);
+  close(): void {
+    this.closed = true;
+    this.stopKeepAlive();
+    this.signaling.stop();
+    for (const state of this.viewers.values()) {
+      if (state.icePollTimer) clearTimeout(state.icePollTimer);
+      state.dc?.close();
+      state.pc.close();
     }
+    this.viewers.clear();
   }
 
-  private async safeAddIceCandidate(
-    pc: RTCPeerConnection,
-    candidate: RTCIceCandidateInit,
+  private async handleViewerTicket(
+    ticketId: string,
+    offer: RTCSessionDescriptionInit,
   ): Promise<void> {
+    const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+    const state: SenderViewerState = {
+      ticketId,
+      pc,
+      dc: null,
+      iceRecvSeq: 0,
+      icePollTimer: null,
+    };
+
+    const pendingSenderICE: RTCIceCandidateInit[] = [];
+
+    pc.onicecandidate = (ev) => {
+      if (!ev.candidate) return;
+      pendingSenderICE.push(ev.candidate.toJSON());
+      // Flush in batches
+      if (pendingSenderICE.length >= 3) {
+        const batch = [...pendingSenderICE];
+        pendingSenderICE.length = 0;
+        this.signaling.postSenderICE(ticketId, batch);
+      }
+    };
+
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState === "complete" && pendingSenderICE.length > 0) {
+        const batch = [...pendingSenderICE];
+        pendingSenderICE.length = 0;
+        this.signaling.postSenderICE(ticketId, batch);
+      }
+    };
+
+    pc.ondatachannel = (ev) => {
+      state.dc = ev.channel;
+      ev.channel.onopen = () => {
+        this.events.onOpen();
+        this.updateAggregateState();
+        this.startKeepAlive();
+      };
+      ev.channel.onmessage = (msgEv) => {
+        this.events.onMessage(typeof msgEv.data === "string" ? msgEv.data : "");
+      };
+      ev.channel.onclose = () => {
+        this.viewers.delete(ticketId);
+        this.updateAggregateState();
+        if (!this.anyOpenChannel()) {
+          this.stopKeepAlive();
+          this.events.onClose();
+        }
+      };
+    };
+
+    pc.onconnectionstatechange = () => {
+      const connState = pc.connectionState;
+      if (connState === "failed" || connState === "closed") {
+        if (state.icePollTimer) clearTimeout(state.icePollTimer);
+        this.viewers.delete(ticketId);
+        this.updateAggregateState();
+      }
+    };
+
+    this.viewers.set(ticketId, state);
+    this.updateAggregateState();
+
     try {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      // Post answer to server
+      await this.signaling.postAnswer(ticketId, pc.localDescription!);
+
+      // Flush any remaining ICE
+      if (pendingSenderICE.length > 0) {
+        const batch = [...pendingSenderICE];
+        pendingSenderICE.length = 0;
+        this.signaling.postSenderICE(ticketId, batch);
+      }
+
+      // Start polling for viewer's ICE candidates
+      this.startViewerICEPoll(state);
     } catch (err) {
-      console.warn("[peer] failed to add ICE candidate:", err);
+      console.error("[sender-peer] handshake failed for ticket:", ticketId, err);
+      pc.close();
+      this.viewers.delete(ticketId);
+    }
+  }
+
+  private startViewerICEPoll(state: SenderViewerState): void {
+    let rounds = 0;
+    const poll = async () => {
+      if (this.closed || rounds >= ICE_POLL_MAX_ROUNDS) return;
+      rounds++;
+      const resp = await this.signaling.getViewerICE(state.ticketId, state.iceRecvSeq);
+      if (resp && resp.candidates.length > 0) {
+        for (const c of resp.candidates) {
+          try {
+            await state.pc.addIceCandidate(new RTCIceCandidate(c));
+          } catch (err) {
+            console.warn("[sender-peer] failed to add ICE candidate:", err);
+          }
+        }
+        state.iceRecvSeq = resp.seq;
+      }
+      if (!this.closed) {
+        state.icePollTimer = setTimeout(poll, ICE_POLL_INTERVAL_MS);
+      }
+    };
+    poll();
+  }
+
+  private anyOpenChannel(): boolean {
+    for (const state of this.viewers.values()) {
+      if (state.dc?.readyState === "open") return true;
+    }
+    return false;
+  }
+
+  private updateAggregateState(): void {
+    if (this.anyOpenChannel()) {
+      this.events.onStateChange("connected");
+    } else if (this.viewers.size > 0) {
+      this.events.onStateChange("connecting");
+    } else {
+      this.events.onStateChange("signaling-joined");
+    }
+  }
+
+  private startKeepAlive(): void {
+    if (this.keepAliveTimer !== null) return;
+    this.keepAliveTimer = setInterval(() => this.send(serializeKeepAlive()), KEEPALIVE_INTERVAL_MS);
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer !== null) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
     }
   }
 }
-

@@ -11,17 +11,106 @@
     <div id="app">
       <!-- Landing page -->
       <div id="landing" class="hidden">
-        <h1>Fernsicht</h1>
-        <p class="subtitle">Peer-to-peer progress tracking</p>
-        <div class="instructions">
-          <p>Open a link with <code>#room=&lt;id&gt;</code> to view progress,</p>
-          <p>or <code>#room=&lt;id&gt;&amp;role=broadcaster</code> to send.</p>
-          <pre>from fernsicht import blick
+        <!-- Hero -->
+        <section class="hero">
+          <img src="./logo.png" alt="Fernsicht" class="hero-logo" />
+          <h1>Fernsicht</h1>
+          <p class="tagline">Watch your code's progress from anywhere.<br/>Peer-to-peer. No accounts. No servers in the way.</p>
+        </section>
 
-for item in blick(data, desc="Working"):
-    process(item)</pre>
-          <p class="hint">A shareable link will appear in your terminal.</p>
-        </div>
+        <!-- Live demo -->
+        <section class="demo-section">
+          <div class="demo-window">
+            <div class="demo-titlebar">
+              <span class="demo-dot red"></span>
+              <span class="demo-dot yellow"></span>
+              <span class="demo-dot green"></span>
+              <span class="demo-title">Live Preview</span>
+            </div>
+            <div class="demo-content">
+              <div class="demo-bar">
+                <div class="demo-header">
+                  <span class="demo-label">Training model</span>
+                  <span class="demo-pct demo-pct-1">0%</span>
+                </div>
+                <div class="demo-track"><div class="demo-fill demo-fill-1"></div></div>
+                <div class="demo-stats demo-stats-1">
+                  <span>0 / 1,200 epochs</span>
+                  <span>18.3 epochs/s</span>
+                  <span>0s</span>
+                  <span>~65s left</span>
+                </div>
+              </div>
+              <div class="demo-bar">
+                <div class="demo-header">
+                  <span class="demo-label">Downloading dataset</span>
+                  <span class="demo-pct demo-pct-2">0%</span>
+                </div>
+                <div class="demo-track"><div class="demo-fill demo-fill-2"></div></div>
+                <div class="demo-stats demo-stats-2">
+                  <span>0 / 8,400 files</span>
+                  <span>142.0 files/s</span>
+                  <span>0s</span>
+                  <span>~59s left</span>
+                </div>
+              </div>
+              <div class="demo-bar">
+                <div class="demo-header">
+                  <span class="demo-label">Processing images</span>
+                  <span class="demo-pct demo-pct-3">0%</span>
+                </div>
+                <div class="demo-track"><div class="demo-fill demo-fill-3"></div></div>
+                <div class="demo-stats demo-stats-3">
+                  <span>0 / 3,600 it</span>
+                  <span>55.2 it/s</span>
+                  <span>0s</span>
+                  <span>~65s left</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- How it works -->
+        <section class="steps-section">
+          <h2 class="section-title">How it works</h2>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-body">
+                <h3>Add one line</h3>
+                <code>pip install fernsicht</code>
+                <p>Wrap any loop or long task with <code>blick()</code>.</p>
+              </div>
+            </div>
+            <div class="step-connector"></div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-body">
+                <h3>Run your code</h3>
+                <p>A shareable link appears in your terminal. Send it to anyone.</p>
+              </div>
+            </div>
+            <div class="step-connector"></div>
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-body">
+                <h3>Watch from anywhere</h3>
+                <p>Open the link on any device. Progress streams directly, peer-to-peer.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- CTA -->
+        <section class="cta-section">
+          <a
+            class="cta-secondary"
+            href="https://github.com/MuteJester/fernsicht"
+            target="_blank"
+            rel="noopener noreferrer"
+          >View on GitHub</a>
+        </section>
       </div>
 
       <!-- Shared header (visible in both broadcaster and viewer) -->
@@ -32,20 +121,6 @@ for item in blick(data, desc="Working"):
           <span id="peer-id" class="meta"></span>
         </div>
         <p id="connection-detail" class="connection-detail hidden"></p>
-        <div class="support-banner">
-          <p class="support-text">
-            Fernsicht is built for the benefit and use of the community. If it helps your
-            work, please consider supporting us so we can keep the domains and server up for everyone.
-          </p>
-          <a
-            class="kofi-link"
-            href="https://ko-fi.com/fernsicht"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Support Fernsicht on Ko-fi
-          </a>
-        </div>
       </div>
 
       <!-- Broadcaster view -->
@@ -62,6 +137,14 @@ for item in blick(data, desc="Working"):
         <p id="viewer-empty" class="hint">Waiting for progress updates...</p>
       </div>
     </div>
+    <footer class="site-footer">
+      <a
+        class="footer-link"
+        href="https://ko-fi.com/fernsicht"
+        target="_blank"
+        rel="noopener noreferrer"
+      ><span class="footer-glow">Help us keep Fernsicht free for everyone</span> — Support on Ko-fi</a>
+    </footer>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

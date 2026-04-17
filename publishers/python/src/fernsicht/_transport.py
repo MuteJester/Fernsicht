@@ -466,13 +466,33 @@ class Transport:
 
         total = state.get("total")
         n = state.get("n")
-        if total is None or not isinstance(total, int) or total <= 0:
-            return None
         if not isinstance(n, int):
             return None
 
-        progress = n / total
-        return serialize_progress(self._task_id, progress)
+        if total is not None and isinstance(total, int) and total > 0:
+            progress = n / total
+        else:
+            progress = 0.0
+
+        elapsed = state.get("elapsed")
+        rate = state.get("rate")
+        unit = state.get("unit", "it")
+
+        eta: float | None = None
+        if total is not None and rate is not None and rate > 0:
+            remaining = max(0, total - n)
+            eta = remaining / rate
+
+        return serialize_progress(
+            self._task_id,
+            progress,
+            elapsed=elapsed,
+            eta=eta,
+            n=n,
+            total=total,
+            rate=rate,
+            unit=unit,
+        )
 
     @staticmethod
     def _try_send_frame(channel: RTCDataChannel, frame: str) -> bool:

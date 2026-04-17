@@ -38,7 +38,7 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          VITE_SIGNALING_URL: wss://signal.fernsicht.space/ws
+          VITE_SERVER_URL: https://signal.fernsicht.space
           VITE_BASE_PATH: /
         run: npm run build
 

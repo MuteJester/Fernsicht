@@ -17,9 +17,30 @@ def serialize_start(task_id: str, label: str) -> str:
     return f"START|{_required(task_id, 'task_id')}|{_required(label, 'label')}"
 
 
-def serialize_progress(task_id: str, value: float) -> str:
+def serialize_progress(
+    task_id: str,
+    value: float,
+    *,
+    elapsed: float | None = None,
+    eta: float | None = None,
+    n: int | None = None,
+    total: int | None = None,
+    rate: float | None = None,
+    unit: str = "it",
+) -> str:
     clamped = max(0.0, min(1.0, value))
-    return f"P|{_required(task_id, 'task_id')}|{clamped:.2f}"
+    parts = [
+        "P",
+        _required(task_id, "task_id"),
+        f"{clamped:.4f}",
+        f"{elapsed:.1f}" if elapsed is not None else "-",
+        f"{eta:.1f}" if eta is not None else "-",
+        str(n) if n is not None else "-",
+        str(total) if total is not None else "-",
+        f"{rate:.2f}" if rate is not None else "-",
+        unit,
+    ]
+    return "|".join(parts)
 
 
 def serialize_end(task_id: str) -> str:
