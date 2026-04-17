@@ -1,24 +1,71 @@
-# Fernsicht
+<p align="center">
+  <img src="./.github/assets/fernsight_icon.png" alt="Fernsicht logo" width="140" />
+</p>
 
-![Fernsight Icon](./.github/assets/fernsight_icon.png)
+<h1 align="center">Fernsicht</h1>
 
-Remote progress bar tracking. Wrap your loop, get a shareable URL, watch progress from anywhere.
+<p align="center">
+  Real-time remote progress monitoring over peer-to-peer WebRTC.
+</p>
 
-```python
-from fernsicht import blick
+<p align="center">
+  <a href="https://app.fernsicht.space">Viewer</a>
+  ·
+  <a href="https://signal.fernsicht.space/healthz">Signal Health</a>
+  ·
+  <a href="./PROTOCOL.md">Protocol</a>
+  ·
+  <a href="https://ko-fi.com/fernsicht">Support on Ko-fi</a>
+</p>
 
-for item in blick(range(10000), desc="Training"):
-    process(item)
-# Prints: View progress at https://yoursite.github.io/fernsicht/#room=...&role=viewer
+---
+
+## What Fernsicht Does
+
+Fernsicht lets you wrap long-running loops and share live progress from any device.
+
+- Sender: your local script or job
+- Viewer: browser on phone, laptop, or another network
+- Transport: WebRTC DataChannel (P2P after handshake)
+- Backend role: signaling/bootstrap only
+
+This keeps latency low and server costs minimal.
+
+## Quick Start
+
+### 1. Install
+
+```bash
+pip install fernsicht
 ```
 
-Open the link on your phone, second monitor, or share it with a colleague. The progress bar updates in real time.
+### 2. Wrap your loop
+
+```python
+import time
+from fernsicht import blick
+
+for _ in blick(range(100), desc="Training"):
+    time.sleep(0.1)
+
+# Up to 4 concurrent viewers:
+for _ in blick(range(100), desc="Training", max_viewers=4):
+    time.sleep(0.1)
+```
+
+The sender prints a shareable viewer URL, for example:
+
+`https://app.fernsicht.space/#room=<room_id>&role=viewer`
+
+Open that link on any device to watch progress live.
 
 ## Hosted Defaults
 
-By default, the Python wrapper bootstraps a session from:
-- signaling: `wss://signal.fernsicht.space/ws`
-- session bootstrap: `https://signal.fernsicht.space/session`
+The Python wrapper uses these defaults out of the box:
+
+- Signaling WebSocket: `wss://signal.fernsicht.space/ws`
+- Session bootstrap API: `https://signal.fernsicht.space/session`
+- Viewer base URL: `https://app.fernsicht.space/`
 
 Override for self-hosting:
 
@@ -29,28 +76,28 @@ export FERNSICHT_SESSION_URL="https://your-signal-domain/session"
 
 ## How It Works
 
-1. The Python wrapper joins a signaling room on your Fernsicht signaling server
-2. The viewer (browser) joins the same room and performs a WebRTC handshake
-3. Progress updates flow over a direct WebRTC DataChannel (P2P), bypassing the signaling server after handshake
+1. Sender requests a session from the signaling server.
+2. Sender and viewer join the same room.
+3. WebRTC handshake is exchanged via signaling.
+4. Progress messages flow directly P2P over DataChannel.
 
-No accounts. Minimal backend load (signaling only).
+After handshake, progress traffic bypasses the signaling server.
 
-## Install
+## Repository Layout
 
-### Python
-```bash
-pip install fernsicht
+```text
+publishers/      Language SDKs (Python, JS, Rust, C, C++)
+frontend/        Static viewer application
+PROTOCOL.md      Wire protocol and message format
 ```
 
-## Architecture
+## Support Fernsicht
 
-```
-publishers/     Per-language libraries (Python, JS, Rust, C, C++)
-frontend/       Static web dashboard (shared by all publishers)
-PROTOCOL.md     Wire protocol specification
-```
+Fernsicht is community-first and open source.
 
-All publishers implement the same protocol. See [PROTOCOL.md](PROTOCOL.md) for the full specification.
+If it saves you time, you can help keep the domain, signaling node, and uptime running:
+
+- `https://ko-fi.com/fernsicht`
 
 ## License
 

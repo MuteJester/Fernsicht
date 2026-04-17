@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DEFAULT_BASE_URL = "https://fernsicht.github.io/fernsicht/"
+DEFAULT_BASE_URL = "https://app.fernsicht.space/"
 
 
 def build_url(

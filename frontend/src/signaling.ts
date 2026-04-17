@@ -2,10 +2,16 @@
 
 export type Role = "SENDER" | "VIEWER";
 
+export interface SignalingError {
+  code: string;
+  message: string;
+  fatal: boolean;
+}
+
 export interface SignalingEvents {
   onOpen: () => void;
   onSignal: (data: string) => void;
-  onError: (err: Event | Error) => void;
+  onError: (err: SignalingError) => void;
   onClose: () => void;
 }
 
@@ -64,7 +70,11 @@ export class SignalingClient {
       const data = typeof ev.data === "string" ? ev.data : "";
       if (data.startsWith("ERROR|")) {
         const reason = data.slice("ERROR|".length) || "UNKNOWN";
-        this.events.onError(new Error(`Signaling server error: ${reason}`));
+        this.events.onError({
+          code: reason,
+          message: `Signaling server error: ${reason}`,
+          fatal: true,
+        });
         if (reason === "ROLE_TAKEN") {
           this.closed = true;
         }
@@ -74,12 +84,23 @@ export class SignalingClient {
     };
 
     this.ws.onerror = (ev: Event) => {
-      this.events.onError(ev);
+      this.events.onError({
+        code: "WS_ERROR",
+        message: String(ev.type || "websocket error"),
+        fatal: false,
+      });
     };
 
     this.ws.onclose = (ev: CloseEvent) => {
       // Policy violations generally indicate a client-side configuration issue.
       if (ev.code === 1008) {
+        if (ev.reason) {
+          this.events.onError({
+            code: "POLICY_VIOLATION",
+            message: ev.reason,
+            fatal: true,
+          });
+        }
         this.closed = true;
       }
       this.events.onClose();

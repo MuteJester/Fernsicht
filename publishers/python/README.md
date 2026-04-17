@@ -48,6 +48,10 @@ from fernsicht import blick
 for item in blick(range(10000), desc="Training"):
     process(item)
 
+# Allow up to 4 concurrent viewers
+for item in blick(range(10000), desc="Training", max_viewers=4):
+    process(item)
+
 # Manual updates
 from fernsicht import manual
 
@@ -66,3 +70,8 @@ with blick(total=500, desc="Epochs") as bar:
 
 A URL like `https://.../#room=<id>&role=viewer` is printed when the bar starts.
 Open it on your phone or another machine to watch live progress.
+
+Viewer cap notes:
+- Default is `max_viewers=1` (single concurrent viewer).
+- Set `max_viewers > 1` for multi-viewer rooms.
+- Server enforces an upper bound via `MAX_VIEWERS_PER_ROOM`.

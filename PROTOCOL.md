@@ -23,6 +23,13 @@ Response JSON includes:
 - `viewer_url`
 - `signaling_url`
 - `expires_at` / `expires_in`
+- `max_viewers`
+
+Optional request body:
+
+```json
+{"max_viewers": 4}
+```
 
 ## 2) Signaling (WebSocket)
 
@@ -51,7 +58,7 @@ Rules:
 
 Server handshake helper:
 
-- server sends `READY` to `SENDER` when both roles are present
+- server sends `READY|<viewer_id>` to `SENDER` when a viewer is present
 
 SDP/ICE envelope format (JSON text frame):
 
@@ -59,6 +66,13 @@ SDP/ICE envelope format (JSON text frame):
 {"type":"offer","payload":{"type":"offer","sdp":"..."}}
 {"type":"answer","payload":{"type":"answer","sdp":"..."}}
 {"type":"ice","payload":{"candidate":"candidate:...","sdpMid":"0","sdpMLineIndex":0}}
+```
+
+For multi-viewer targeting:
+
+```json
+{"to":"<viewer_id>","type":"offer","payload":{"type":"offer","sdp":"..."}}
+{"type":"answer","payload":{"type":"answer","sdp":"..."},"from":"<viewer_id>"}
 ```
 
 ## 3) DataChannel Messages (Pipe-delimited)

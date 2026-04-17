@@ -22,6 +22,7 @@ class SessionInfo:
     signaling_url: str
     expires_at: str | None
     expires_in: int | None
+    max_viewers: int | None
 
 
 def derive_session_url(signaling_url: str) -> str:
@@ -57,13 +58,23 @@ def create_session(
     session_url: str,
     timeout_sec: float = DEFAULT_TIMEOUT_SEC,
     api_key: str | None = None,
+    max_viewers: int | None = None,
 ) -> SessionInfo:
     """Create a session via the signaling bootstrap endpoint."""
     headers = {"Accept": "application/json"}
     if api_key:
         headers["X-Fernsicht-Api-Key"] = api_key
 
-    req = Request(session_url, method="POST", headers=headers)
+    body: bytes | None = None
+    if max_viewers is not None:
+        if isinstance(max_viewers, bool) or not isinstance(max_viewers, int):
+            raise SessionBootstrapError("max_viewers must be an integer")
+        if max_viewers < 1:
+            raise SessionBootstrapError("max_viewers must be >= 1")
+        body = json.dumps({"max_viewers": max_viewers}).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = Request(session_url, data=body, method="POST", headers=headers)
     try:
         with urlopen(req, timeout=timeout_sec) as response:  # nosec B310
             payload = response.read().decode("utf-8")
@@ -81,6 +92,7 @@ def create_session(
     signaling_url = data.get("signaling_url")
     expires_at = data.get("expires_at")
     expires_in = data.get("expires_in")
+    max_viewers_value = data.get("max_viewers")
 
     if not isinstance(room_id, str) or not room_id:
         raise SessionBootstrapError("session response missing room_id")
@@ -94,6 +106,8 @@ def create_session(
         raise SessionBootstrapError("session response contains invalid expires_at")
     if expires_in is not None and not isinstance(expires_in, int):
         raise SessionBootstrapError("session response contains invalid expires_in")
+    if max_viewers_value is not None and not isinstance(max_viewers_value, int):
+        raise SessionBootstrapError("session response contains invalid max_viewers")
 
     return SessionInfo(
         room_id=room_id,
@@ -102,4 +116,5 @@ def create_session(
         signaling_url=signaling_url,
         expires_at=expires_at,
         expires_in=expires_in,
+        max_viewers=max_viewers_value,
     )

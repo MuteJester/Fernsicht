@@ -34,6 +34,24 @@ def _env_bool(name: str, default: bool) -> bool:
     raise ValueError(f"{name} must be a boolean (true/false)")
 
 
+def _normalize_max_viewers(
+    *,
+    max_viewers: int,
+    multi_viewer: int | None,
+) -> int:
+    resolved = max_viewers
+    if multi_viewer is not None:
+        if max_viewers != 1 and multi_viewer != max_viewers:
+            raise ValueError("max_viewers and multi_viewer must match when both are set")
+        resolved = multi_viewer
+
+    if isinstance(resolved, bool) or not isinstance(resolved, int):
+        raise ValueError("max_viewers must be an integer")
+    if resolved < 1:
+        raise ValueError("max_viewers must be >= 1")
+    return resolved
+
+
 class FernsichtBar(Generic[T]):
     """A progress bar that publishes updates remotely.
 
@@ -62,6 +80,8 @@ class FernsichtBar(Generic[T]):
         signaling_url: str | None = None,
         session_url: str | None = None,
         sender_token: str | None = None,
+        max_viewers: int = 1,
+        multi_viewer: int | None = None,
     ) -> None:
         self._iterable = iterable
         self._desc = desc
@@ -88,6 +108,11 @@ class FernsichtBar(Generic[T]):
             self._url = ""
             return
 
+        resolved_max_viewers = _normalize_max_viewers(
+            max_viewers=max_viewers,
+            multi_viewer=multi_viewer,
+        )
+
         resolved_signaling_url = (
             signaling_url or os.getenv(SIGNALING_URL_ENV) or DEFAULT_SIGNALING_URL
         )
@@ -108,6 +133,7 @@ class FernsichtBar(Generic[T]):
                 session = create_session(
                     session_url=chosen_session_url,
                     api_key=resolved_api_key,
+                    max_viewers=resolved_max_viewers,
                 )
                 self._room_id = session.room_id
                 resolved_sender_token = session.sender_token
@@ -267,12 +293,17 @@ def blick(
     total: int | None = None,
     unit: str = "it",
     disable: bool = False,
+    max_viewers: int = 1,
+    multi_viewer: int | None = None,
     **kwargs: object,
 ) -> FernsichtBar[T]:
     """Create a remote progress bar. Wrap any iterable to track it live."""
     return FernsichtBar(
         iterable=iterable, desc=desc, total=total, unit=unit,
-        disable=disable, **kwargs,  # type: ignore[arg-type]
+        disable=disable,
+        max_viewers=max_viewers,
+        multi_viewer=multi_viewer,
+        **kwargs,  # type: ignore[arg-type]
     )
 
 
@@ -280,9 +311,17 @@ def manual(
     total: int | None = None,
     desc: str | None = None,
     unit: str = "it",
+    max_viewers: int = 1,
+    multi_viewer: int | None = None,
     **kwargs: object,
 ) -> FernsichtBar:
     """Create a manual-update progress bar (no iterable)."""
     return FernsichtBar(
-        iterable=None, desc=desc, total=total, unit=unit, **kwargs,  # type: ignore[arg-type]
+        iterable=None,
+        desc=desc,
+        total=total,
+        unit=unit,
+        max_viewers=max_viewers,
+        multi_viewer=multi_viewer,
+        **kwargs,  # type: ignore[arg-type]
     )

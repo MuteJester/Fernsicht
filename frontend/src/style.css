@@ -122,6 +122,65 @@ body {
   color: #8b949e;
 }
 
+.connection-detail {
+  margin: -0.25rem 0 1rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.connection-detail.info {
+  color: #9ad0ff;
+}
+
+.connection-detail.warning {
+  color: #d29922;
+}
+
+.connection-detail.error {
+  color: #f85149;
+}
+
+.support-banner {
+  margin-bottom: 1.2rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #161b22 0%, #131820 100%);
+}
+
+.support-text {
+  margin: 0;
+  color: #c9d1d9;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.kofi-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.7rem;
+  padding: 0.42rem 0.7rem;
+  border-radius: 7px;
+  border: 1px solid #5aa2e7;
+  background: rgba(88, 166, 255, 0.12);
+  color: #9ad0ff;
+  font-size: 0.76rem;
+  text-decoration: none;
+  letter-spacing: 0.01em;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.kofi-link:hover {
+  background: rgba(88, 166, 255, 0.2);
+  border-color: #7bb8ee;
+  color: #d2ebff;
+}
+
+.kofi-link:active {
+  background: rgba(88, 166, 255, 0.28);
+}
+
 /* Broadcaster */
 #broadcaster-view h2,
 #viewer-view h2 {
@@ -232,6 +291,17 @@ body {
   }
   #landing h1 {
     font-size: 1.8rem;
+  }
+  .support-banner {
+    padding: 0.8rem 0.85rem;
+  }
+  .support-text {
+    font-size: 0.75rem;
+  }
+  .kofi-link {
+    width: 100%;
+    margin-top: 0.65rem;
+    font-size: 0.74rem;
   }
   .log {
     max-height: 250px;

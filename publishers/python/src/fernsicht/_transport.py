@@ -7,12 +7,20 @@ import json
 import logging
 import threading
 import time
+from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any
 
 import aiohttp
-from aiortc import RTCConfiguration, RTCDataChannel, RTCIceCandidate, RTCIceServer, RTCPeerConnection, RTCSessionDescription
-from aiortc.sdp import candidate_from_sdp
+from aiortc import (
+    RTCConfiguration,
+    RTCDataChannel,
+    RTCIceCandidate,
+    RTCIceServer,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
+from aiortc.sdp import candidate_from_sdp, candidate_to_sdp
 
 from fernsicht._wire import (
     serialize_end,
@@ -27,11 +35,26 @@ logger = logging.getLogger("fernsicht")
 PUBLISH_INTERVAL = 0.5
 HEARTBEAT_INTERVAL = 5.0
 SHUTDOWN_GRACE_SEC = 2.0
+LEGACY_VIEWER_ID = "__legacy__"
 
 STUN_SERVERS = [
     RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
     RTCIceServer(urls=["stun:stun1.l.google.com:19302"]),
 ]
+
+
+@dataclass(slots=True)
+class ViewerPeerState:
+    viewer_id: str
+    pc: RTCPeerConnection
+    channel: RTCDataChannel
+    channel_open: asyncio.Event = field(default_factory=asyncio.Event)
+    pending_remote_ice: list[RTCIceCandidate] = field(default_factory=list)
+    remote_description_set: bool = False
+    session_frames_sent: bool = False
+    pending_outbound: list[str] = field(default_factory=list)
+    last_send: float = field(default_factory=time.monotonic)
+    disconnected_since: float | None = None
 
 
 class Transport:
@@ -62,6 +85,7 @@ class Transport:
         # Latest state snapshot from user thread.
         self._lock = threading.Lock()
         self._latest: dict[str, Any] | None = None
+        self._snapshot: dict[str, Any] | None = None
 
         self._outbound_immediate: Queue[str] = Queue()
         self._closed = False
@@ -86,7 +110,7 @@ class Transport:
     ) -> None:
         """Update the latest state. Called from the user's thread."""
         with self._lock:
-            self._latest = {
+            state = {
                 "n": n,
                 "total": total,
                 "desc": desc,
@@ -94,9 +118,11 @@ class Transport:
                 "rate": rate,
                 "elapsed": elapsed,
             }
+            self._latest = state
+            self._snapshot = state
 
     def send_error(self, *, error: str, message: str, fatal: bool) -> None:
-        """Record an error and end the current task on the viewer."""
+        """Record an error and end the current task on all connected viewers."""
         logger.warning("Publisher error: %s: %s (fatal=%s)", error, message, fatal)
         self._outbound_immediate.put(serialize_end(self._task_id))
 
@@ -125,212 +151,293 @@ class Transport:
             logger.exception("WebRTC transport thread crashed")
 
     async def _run_async(self) -> None:
-        pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=STUN_SERVERS))
-        channel = pc.createDataChannel("fernsicht", ordered=True)
-
-        channel_open = asyncio.Event()
-
-        @channel.on("open")
-        def _on_open() -> None:
-            logger.debug("DataChannel open for room %s", self._room_id)
-            channel_open.set()
-
-        @pc.on("connectionstatechange")
-        async def _on_state_change() -> None:
-            logger.debug("Peer state for %s: %s", self._room_id, pc.connectionState)
-
-        pending_remote_ice: list[RTCIceCandidate] = []
-        remote_description_set = False
-        sent_offer = False
-        session_frames_sent = False
-
-        pending_outbound: list[str] = []
-        last_send = time.monotonic()
+        viewer_peers: dict[str, ViewerPeerState] = {}
+        pending_broadcast: list[str] = []
         last_tick = time.monotonic()
         shutdown_deadline: float | None = None
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.ws_connect(
-                    self._signaling_url,
-                    heartbeat=30.0,
-                    autoping=True,
-                    max_msg_size=1_048_576,
-                ) as ws:
-                    await ws.send_str(self._build_join_message())
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(
+                self._signaling_url,
+                heartbeat=30.0,
+                autoping=True,
+                max_msg_size=1_048_576,
+            ) as ws:
+                await ws.send_str(self._build_join_message())
 
-                    while True:
-                        # Read signaling with short timeout so publish loop continues.
-                        try:
-                            sig_msg = await ws.receive(timeout=0.2)
-                        except asyncio.TimeoutError:
-                            sig_msg = None
+                while True:
+                    try:
+                        sig_msg = await ws.receive(timeout=0.2)
+                    except asyncio.TimeoutError:
+                        sig_msg = None
 
-                        if sig_msg is not None:
-                            should_continue = await self._handle_signaling_message(
-                                sig_msg=sig_msg,
-                                ws=ws,
-                                pc=pc,
-                                sent_offer=sent_offer,
-                                remote_description_set=remote_description_set,
-                                pending_remote_ice=pending_remote_ice,
-                            )
-                            sent_offer = should_continue["sent_offer"]
-                            remote_description_set = should_continue["remote_description_set"]
-                            if should_continue["stop"]:
-                                break
-
-                        # Drain immediate queue.
-                        while True:
-                            try:
-                                pending_outbound.append(self._outbound_immediate.get_nowait())
-                            except Empty:
-                                break
-
-                        now = time.monotonic()
-                        channel_ready_now = (
-                            channel_open.is_set() and channel.readyState == "open"
+                    if sig_msg is not None:
+                        should_stop = await self._handle_signaling_message(
+                            sig_msg=sig_msg,
+                            ws=ws,
+                            viewer_peers=viewer_peers,
                         )
+                        if should_stop:
+                            break
 
-                        # Send static session frames once DataChannel opens.
-                        if channel_ready_now and not session_frames_sent:
-                            pending_outbound.append(serialize_identity(self._peer_id))
-                            pending_outbound.append(
+                    # Drain immediate queue.
+                    while True:
+                        try:
+                            pending_broadcast.append(self._outbound_immediate.get_nowait())
+                        except Empty:
+                            break
+
+                    now = time.monotonic()
+                    if (now - last_tick) >= PUBLISH_INTERVAL:
+                        last_tick = now
+                        progress = self._consume_latest_progress()
+                        if progress is not None:
+                            pending_broadcast.append(progress)
+
+                    stale_viewer_ids = [
+                        viewer_id
+                        for viewer_id, state in viewer_peers.items()
+                        if (
+                            state.pc.connectionState in {"failed", "closed"}
+                            or (
+                                state.pc.connectionState == "disconnected"
+                                and state.disconnected_since is not None
+                                and (now - state.disconnected_since) >= 20.0
+                            )
+                        )
+                    ]
+                    for viewer_id in stale_viewer_ids:
+                        await self._close_viewer_peer(viewer_peers.pop(viewer_id))
+
+                    for state in viewer_peers.values():
+                        channel_ready_now = (
+                            state.channel_open.is_set()
+                            and state.channel.readyState == "open"
+                        )
+                        if not channel_ready_now:
+                            continue
+
+                        if not state.session_frames_sent:
+                            state.pending_outbound.append(serialize_identity(self._peer_id))
+                            state.pending_outbound.append(
                                 serialize_start(self._task_id, self._desc or "Task")
                             )
-                            session_frames_sent = True
+                            snapshot = self._snapshot_progress()
+                            if snapshot is not None:
+                                state.pending_outbound.append(snapshot)
+                            state.session_frames_sent = True
 
-                        # Periodic progress / heartbeat.
-                        if channel_ready_now and (now - last_tick) >= PUBLISH_INTERVAL:
-                            last_tick = now
-                            progress = self._consume_latest_progress()
-                            if progress is not None:
-                                pending_outbound.append(progress)
-                            elif (now - last_send) >= HEARTBEAT_INTERVAL:
-                                pending_outbound.append(serialize_keepalive())
+                        if pending_broadcast:
+                            state.pending_outbound.extend(pending_broadcast)
+                        elif (now - state.last_send) >= HEARTBEAT_INTERVAL:
+                            state.pending_outbound.append(serialize_keepalive())
 
-                        # Attempt to flush outbound frames.
-                        if channel_ready_now:
-                            still_pending: list[str] = []
-                            for frame in pending_outbound:
-                                if self._try_send_frame(channel, frame):
-                                    last_send = time.monotonic()
-                                else:
-                                    still_pending.append(frame)
-                            pending_outbound = still_pending
+                        still_pending: list[str] = []
+                        for frame in state.pending_outbound:
+                            if self._try_send_frame(state.channel, frame):
+                                state.last_send = time.monotonic()
+                            else:
+                                still_pending.append(frame)
+                        state.pending_outbound = still_pending
 
-                        # Shutdown condition with grace period for final frames.
-                        if self._stop_event.is_set():
-                            if shutdown_deadline is None:
-                                shutdown_deadline = time.monotonic() + SHUTDOWN_GRACE_SEC
-                            if not pending_outbound:
-                                break
-                            if time.monotonic() >= shutdown_deadline:
-                                break
-        finally:
-            await pc.close()
+                    # Snapshot is authoritative for late joiners; do not accumulate.
+                    pending_broadcast = []
+
+                    if self._stop_event.is_set():
+                        if shutdown_deadline is None:
+                            shutdown_deadline = time.monotonic() + SHUTDOWN_GRACE_SEC
+                        if self._all_outbound_drained(viewer_peers):
+                            break
+                        if time.monotonic() >= shutdown_deadline:
+                            break
+
+        for state in viewer_peers.values():
+            await self._close_viewer_peer(state)
 
     async def _handle_signaling_message(
         self,
         *,
         sig_msg: aiohttp.WSMessage,
         ws: aiohttp.ClientWebSocketResponse,
-        pc: RTCPeerConnection,
-        sent_offer: bool,
-        remote_description_set: bool,
-        pending_remote_ice: list[RTCIceCandidate],
-    ) -> dict[str, bool]:
-        stop = False
-
+        viewer_peers: dict[str, ViewerPeerState],
+    ) -> bool:
         if sig_msg.type == aiohttp.WSMsgType.TEXT:
             raw = str(sig_msg.data).strip()
 
             if raw.startswith("ERROR|"):
                 reason = raw.split("|", 1)[1] if "|" in raw else "UNKNOWN"
                 logger.error("Signaling server rejected join for %s: %s", self._room_id, reason)
-                stop = True
-                return {
-                    "stop": stop,
-                    "sent_offer": sent_offer,
-                    "remote_description_set": remote_description_set,
-                }
+                return True
 
-            if raw == "READY" and not sent_offer:
-                await self._send_offer(pc, ws)
-                sent_offer = True
-                return {
-                    "stop": stop,
-                    "sent_offer": sent_offer,
-                    "remote_description_set": remote_description_set,
-                }
+            ready_viewer_id = self._parse_ready_viewer_id(raw)
+            if ready_viewer_id is not None:
+                existing = viewer_peers.pop(ready_viewer_id, None)
+                if existing is not None:
+                    await self._close_viewer_peer(existing)
+
+                state = await self._create_viewer_peer(ready_viewer_id, ws)
+                viewer_peers[ready_viewer_id] = state
+                await self._send_offer(state, ws)
+                return False
 
             try:
                 envelope = json.loads(raw)
             except json.JSONDecodeError:
                 logger.debug("Ignoring non-JSON signaling message: %s", raw)
-                return {
-                    "stop": stop,
-                    "sent_offer": sent_offer,
-                    "remote_description_set": remote_description_set,
-                }
+                return False
+
+            if not isinstance(envelope, dict):
+                return False
 
             msg_type = envelope.get("type")
             payload = envelope.get("payload")
+
+            viewer_id = envelope.get("from")
+            if not isinstance(viewer_id, str) or not viewer_id:
+                if len(viewer_peers) == 1:
+                    viewer_id = next(iter(viewer_peers))
+                else:
+                    viewer_id = LEGACY_VIEWER_ID
+
+            state = viewer_peers.get(viewer_id)
+            if state is None:
+                return False
 
             if msg_type == "answer" and isinstance(payload, dict):
                 answer_type = payload.get("type")
                 answer_sdp = payload.get("sdp")
                 if answer_type == "answer" and isinstance(answer_sdp, str):
-                    await pc.setRemoteDescription(
+                    await state.pc.setRemoteDescription(
                         RTCSessionDescription(sdp=answer_sdp, type=answer_type)
                     )
-                    remote_description_set = True
-                    for candidate in pending_remote_ice:
-                        await pc.addIceCandidate(candidate)
-                    pending_remote_ice.clear()
+                    state.remote_description_set = True
+                    for candidate in state.pending_remote_ice:
+                        try:
+                            await state.pc.addIceCandidate(candidate)
+                        except Exception:
+                            logger.debug(
+                                "Ignoring remote ICE add failure for %s/%s",
+                                self._room_id,
+                                viewer_id,
+                            )
+                    state.pending_remote_ice.clear()
             elif msg_type == "ice" and isinstance(payload, dict):
                 candidate = self._parse_remote_ice_candidate(payload)
                 if candidate is not None:
-                    if remote_description_set:
-                        await pc.addIceCandidate(candidate)
+                    if state.remote_description_set:
+                        try:
+                            await state.pc.addIceCandidate(candidate)
+                        except Exception:
+                            logger.debug(
+                                "Ignoring remote ICE add failure for %s/%s",
+                                self._room_id,
+                                viewer_id,
+                            )
                     else:
-                        pending_remote_ice.append(candidate)
-        elif sig_msg.type in (
+                        state.pending_remote_ice.append(candidate)
+
+            return False
+
+        if sig_msg.type in (
             aiohttp.WSMsgType.CLOSE,
             aiohttp.WSMsgType.CLOSED,
             aiohttp.WSMsgType.CLOSING,
             aiohttp.WSMsgType.ERROR,
         ):
-            stop = True
+            return True
 
-        return {
-            "stop": stop,
-            "sent_offer": sent_offer,
-            "remote_description_set": remote_description_set,
-        }
+        return False
+
+    async def _create_viewer_peer(
+        self,
+        viewer_id: str,
+        ws: aiohttp.ClientWebSocketResponse,
+    ) -> ViewerPeerState:
+        pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=STUN_SERVERS))
+        channel = pc.createDataChannel("fernsicht", ordered=True)
+        state = ViewerPeerState(viewer_id=viewer_id, pc=pc, channel=channel)
+
+        @channel.on("open")
+        def _on_open() -> None:
+            logger.debug("DataChannel open for room %s viewer=%s", self._room_id, viewer_id)
+            state.channel_open.set()
+
+        @channel.on("close")
+        def _on_channel_close() -> None:
+            state.channel_open.clear()
+
+        @pc.on("connectionstatechange")
+        async def _on_state_change() -> None:
+            logger.debug(
+                "Peer state for %s viewer=%s: %s",
+                self._room_id,
+                viewer_id,
+                pc.connectionState,
+            )
+            if pc.connectionState == "disconnected":
+                state.disconnected_since = time.monotonic()
+            else:
+                state.disconnected_since = None
+
+            if pc.connectionState in {"disconnected", "failed", "closed"}:
+                state.channel_open.clear()
+
+        @pc.on("icecandidate")
+        async def _on_icecandidate(candidate: RTCIceCandidate | None) -> None:
+            if candidate is None or ws.closed:
+                return
+            try:
+                await ws.send_str(
+                    json.dumps(
+                        {
+                            "to": viewer_id,
+                            "type": "ice",
+                            "payload": {
+                                "candidate": f"candidate:{candidate_to_sdp(candidate)}",
+                                "sdpMid": candidate.sdpMid,
+                                "sdpMLineIndex": candidate.sdpMLineIndex,
+                            },
+                        },
+                        separators=(",", ":"),
+                    )
+                )
+            except (ConnectionResetError, RuntimeError):
+                return
+
+        return state
+
+    async def _close_viewer_peer(self, state: ViewerPeerState) -> None:
+        try:
+            if state.channel.readyState != "closed":
+                state.channel.close()
+        except Exception:
+            pass
+        await state.pc.close()
 
     async def _send_offer(
         self,
-        pc: RTCPeerConnection,
+        state: ViewerPeerState,
         ws: aiohttp.ClientWebSocketResponse,
     ) -> None:
-        offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
-        await self._wait_for_ice_gathering_complete(pc)
+        offer = await state.pc.createOffer()
+        await state.pc.setLocalDescription(offer)
+        await self._wait_for_ice_gathering_complete(state.pc)
 
-        local = pc.localDescription
+        local = state.pc.localDescription
         if local is None:
             return
 
         await ws.send_str(
             json.dumps(
                 {
+                    "to": state.viewer_id,
                     "type": "offer",
                     "payload": {
                         "type": local.type,
                         "sdp": local.sdp,
                     },
-                }
+                },
+                separators=(",", ":"),
             )
         )
 
@@ -345,6 +452,15 @@ class Transport:
             state = self._latest
             self._latest = None
 
+        return self._progress_frame_from_state(state)
+
+    def _snapshot_progress(self) -> str | None:
+        with self._lock:
+            state = self._snapshot
+
+        return self._progress_frame_from_state(state)
+
+    def _progress_frame_from_state(self, state: dict[str, Any] | None) -> str | None:
         if state is None:
             return None
 
@@ -365,6 +481,19 @@ class Transport:
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _parse_ready_viewer_id(raw: str) -> str | None:
+        if raw == "READY":
+            return LEGACY_VIEWER_ID
+        if raw.startswith("READY|"):
+            viewer_id = raw.split("|", 1)[1].strip()
+            if viewer_id:
+                return viewer_id
+        return None
+
+    def _all_outbound_drained(self, viewer_peers: dict[str, ViewerPeerState]) -> bool:
+        return all(not state.pending_outbound for state in viewer_peers.values())
 
     def _build_join_message(self) -> str:
         if self._sender_token:

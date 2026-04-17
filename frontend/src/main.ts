@@ -12,6 +12,7 @@ import {
   appendBroadcasterLog,
   completeProgressBar,
   createProgressBar,
+  setConnectionDetail,
   setConnectionStatus,
   setPeerId,
   setRoomId,
@@ -48,6 +49,41 @@ function toSignalingRole(role: "broadcaster" | "viewer"): Role {
   return role === "broadcaster" ? "SENDER" : "VIEWER";
 }
 
+function viewerErrorMessage(code: string): string {
+  if (code === "ROLE_TAKEN") {
+    return "This room already has an active viewer. Close the other viewer tab and try again.";
+  }
+  if (code === "SERVER_BUSY") {
+    return "The signaling node is currently busy. Retry in a few seconds.";
+  }
+  if (code === "VIEWER_CAPACITY") {
+    return "This room reached its viewer limit. Try again when a viewer disconnects.";
+  }
+  if (code === "POLICY_VIOLATION") {
+    return "The join request was rejected. Check that the link is complete and not expired.";
+  }
+  if (code === "WS_ERROR") {
+    return "Network error while connecting to signaling. Retrying automatically.";
+  }
+  return "Connection to signaling failed.";
+}
+
+function broadcasterErrorMessage(code: string): string {
+  if (code === "ROLE_TAKEN") {
+    return "Another broadcaster is already active in this room.";
+  }
+  if (code === "SERVER_BUSY") {
+    return "The signaling node is currently busy. Retry shortly.";
+  }
+  if (code === "POLICY_VIOLATION") {
+    return "The broadcaster join was rejected. Check sender token/session settings.";
+  }
+  if (code === "WS_ERROR") {
+    return "Network error while connecting to signaling. Retrying automatically.";
+  }
+  return "Signaling connection failed.";
+}
+
 function getSignalingUrl(): string {
   const url = import.meta.env.VITE_SIGNALING_URL;
   if (!url) {
@@ -73,13 +109,26 @@ function startViewer(signalingUrl: string, roomId: string): void {
   showViewerView();
   setRoomId(roomId);
   setConnectionStatus("connecting");
+  setConnectionDetail("Connecting to signaling...", "info");
+  let signalingFatal = false;
 
   const peer = new FernsichtPeer(
     signalingUrl,
     roomId,
     toSignalingRole("viewer"),
     {
-      onOpen: () => setConnectionStatus("connected"),
+      onOpen: () => {
+        signalingFatal = false;
+        setConnectionStatus("connected");
+        setConnectionDetail("Connected. Waiting for live updates...", "info");
+      },
+      onSignalingError: (code, _message, fatal) => {
+        signalingFatal = fatal;
+        setConnectionStatus("signaling-error");
+        const tone =
+          code === "WS_ERROR" || code === "SERVER_BUSY" ? "warning" : "error";
+        setConnectionDetail(viewerErrorMessage(code), tone);
+      },
       onMessage: (raw) => {
         try {
           const msg = parseMessage(raw);
@@ -104,9 +153,37 @@ function startViewer(signalingUrl: string, roomId: string): void {
           console.error("Failed to parse message:", err, raw);
         }
       },
-      onClose: () => setConnectionStatus("disconnected"),
+      onClose: () => {
+        if (signalingFatal) return;
+        setConnectionStatus("disconnected");
+        setConnectionDetail("Disconnected. Attempting reconnect...", "warning");
+      },
       onStateChange: (state) => {
-        if (state === "connecting") setConnectionStatus("connecting");
+        if (signalingFatal && state === "signaling-closed") {
+          return;
+        }
+        if (state === "connecting") {
+          setConnectionStatus("connecting");
+          setConnectionDetail("Connecting to signaling...", "info");
+          return;
+        }
+        if (state === "signaling-joined") {
+          setConnectionStatus("connecting");
+          setConnectionDetail(
+            "Signaling connected. Waiting for sender handshake...",
+            "info",
+          );
+          return;
+        }
+        if (state === "connected") {
+          setConnectionStatus("connected");
+          setConnectionDetail("Connected. Waiting for live updates...", "info");
+          return;
+        }
+        if (state === "signaling-closed") {
+          setConnectionStatus("disconnected");
+          setConnectionDetail("Signaling closed. Reconnecting...", "warning");
+        }
       },
     },
   );
@@ -124,6 +201,8 @@ function startBroadcaster(
   showBroadcasterView();
   setRoomId(roomId);
   setConnectionStatus("connecting");
+  setConnectionDetail("Connecting to signaling...", "info");
+  let signalingFatal = false;
 
   const mockBtn = document.getElementById("mock-btn") as HTMLButtonElement | null;
   if (mockBtn) mockBtn.disabled = true;
@@ -134,19 +213,47 @@ function startBroadcaster(
     toSignalingRole("broadcaster"),
     {
       onOpen: () => {
+        signalingFatal = false;
         setConnectionStatus("connected");
+        setConnectionDetail("Connected. Viewer can now join this room.", "info");
         appendBroadcasterLog("DataChannel open — ready to send");
         if (mockBtn) mockBtn.disabled = false;
+      },
+      onSignalingError: (code, _message, fatal) => {
+        signalingFatal = fatal;
+        setConnectionStatus("signaling-error");
+        const tone =
+          code === "WS_ERROR" || code === "SERVER_BUSY" ? "warning" : "error";
+        setConnectionDetail(broadcasterErrorMessage(code), tone);
       },
       onMessage: (raw) => {
         appendBroadcasterLog(`< ${raw}`);
       },
       onClose: () => {
+        if (signalingFatal) return;
         setConnectionStatus("disconnected");
+        setConnectionDetail("Disconnected. Attempting reconnect...", "warning");
         if (mockBtn) mockBtn.disabled = true;
       },
       onStateChange: (state) => {
         appendBroadcasterLog(`State: ${state}`);
+        if (signalingFatal && state === "signaling-closed") {
+          return;
+        }
+        if (state === "connecting") {
+          setConnectionStatus("connecting");
+          setConnectionDetail("Connecting to signaling...", "info");
+          return;
+        }
+        if (state === "signaling-joined") {
+          setConnectionStatus("connecting");
+          setConnectionDetail("Waiting for viewer to connect...", "info");
+          return;
+        }
+        if (state === "signaling-closed") {
+          setConnectionStatus("disconnected");
+          setConnectionDetail("Signaling closed. Reconnecting...", "warning");
+        }
       },
     },
     { senderJoinToken },

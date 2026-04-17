@@ -11,6 +11,7 @@ export function showLanding(): void {
   $("header").classList.add("hidden");
   $("broadcaster-view").classList.add("hidden");
   $("viewer-view").classList.add("hidden");
+  setConnectionDetail(null);
 }
 
 export function showBroadcasterView(): void {
@@ -18,6 +19,7 @@ export function showBroadcasterView(): void {
   $("header").classList.remove("hidden");
   $("broadcaster-view").classList.remove("hidden");
   $("viewer-view").classList.add("hidden");
+  setConnectionDetail(null);
 }
 
 export function showViewerView(): void {
@@ -25,6 +27,7 @@ export function showViewerView(): void {
   $("header").classList.remove("hidden");
   $("broadcaster-view").classList.add("hidden");
   $("viewer-view").classList.remove("hidden");
+  setConnectionDetail(null);
   updateViewerEmptyState();
 }
 
@@ -44,6 +47,21 @@ export function setRoomId(roomId: string): void {
 
 export function setPeerId(id: string): void {
   $("peer-id").textContent = `Peer: ${id}`;
+}
+
+export function setConnectionDetail(
+  message: string | null,
+  tone: "info" | "warning" | "error" = "info",
+): void {
+  const el = $("connection-detail");
+  if (message === null || message.trim() === "") {
+    el.textContent = "";
+    el.className = "connection-detail hidden";
+    return;
+  }
+
+  el.textContent = message;
+  el.className = `connection-detail ${tone}`;
 }
 
 // --- Viewer: multi-bar progress rendering ---
