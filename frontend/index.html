@@ -13,70 +13,79 @@
       <div id="landing" class="hidden">
         <!-- Hero -->
         <section class="hero">
-          <img src="./logo.png" alt="Fernsicht" class="hero-logo" />
+          <div class="hero-logo-wrap">
+            <div class="logo-bubbles" aria-hidden="true">
+              <span class="logo-bubble"></span>
+              <span class="logo-bubble"></span>
+              <span class="logo-bubble"></span>
+              <span class="logo-bubble"></span>
+              <span class="logo-bubble"></span>
+            </div>
+            <img src="./logo.png" alt="Fernsicht" class="hero-logo" />
+          </div>
           <h1>Fernsicht</h1>
           <p class="tagline">Watch your code's progress from anywhere.<br/>Peer-to-peer. No accounts. No servers in the way.</p>
         </section>
 
-        <!-- Live demo -->
+        <!-- Live demo — mini observation card -->
         <section class="demo-section">
-          <div class="demo-window">
-            <div class="demo-titlebar">
-              <span class="demo-dot red"></span>
-              <span class="demo-dot yellow"></span>
-              <span class="demo-dot green"></span>
-              <span class="demo-title">Live Preview</span>
+          <article class="card card--focus card--demo" id="demo-card">
+            <span class="corner corner--tl"></span>
+            <span class="corner corner--tr"></span>
+            <span class="corner corner--bl"></span>
+            <span class="corner corner--br"></span>
+            <span class="card-label">
+              <span>Observation</span>
+              <strong>demo</strong>
+            </span>
+            <div class="card-body">
+              <div class="card-head">
+                <div>
+                  <h3 class="title" id="demo-title">Training model</h3>
+                  <p class="subtitle" id="demo-subtitle">0 / 1 200 epochs</p>
+                </div>
+              </div>
+              <div class="percent" id="demo-percent-wrap" data-progress-tier="low">
+                <span id="demo-pct-num">0</span><span class="percent-sign">%</span>
+              </div>
+              <div class="horizon-block">
+                <div class="horizon">
+                  <div class="horizon-fill" id="demo-fill"></div>
+                  <div class="horizon-dot" id="demo-dot"></div>
+                </div>
+              </div>
+              <div class="divider"></div>
+              <div class="stats stats--compact">
+                <div class="stat stat--secondary">
+                  <span class="stat-key">Rate</span>
+                  <div class="stat-value-row">
+                    <span class="stat-value-med" id="demo-rate">18</span>
+                    <span class="stat-value-unit" id="demo-unit">ep/s</span>
+                  </div>
+                </div>
+                <div class="stat stat--secondary">
+                  <span class="stat-key">Elapsed</span>
+                  <div class="stat-value-row">
+                    <span class="stat-value-med" id="demo-elapsed">0:00</span>
+                  </div>
+                </div>
+                <div class="stat stat--secondary">
+                  <span class="stat-key">ETA</span>
+                  <div class="stat-value-row">
+                    <span class="stat-value-med" id="demo-eta">1:05</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="demo-content">
-              <div class="demo-bar">
-                <div class="demo-header">
-                  <span class="demo-label">Training model</span>
-                  <span class="demo-pct demo-pct-1">0%</span>
-                </div>
-                <div class="demo-track"><div class="demo-fill demo-fill-1"></div></div>
-                <div class="demo-stats demo-stats-1">
-                  <span>0 / 1,200 epochs</span>
-                  <span>18.3 epochs/s</span>
-                  <span>0s</span>
-                  <span>~65s left</span>
-                </div>
-              </div>
-              <div class="demo-bar">
-                <div class="demo-header">
-                  <span class="demo-label">Downloading dataset</span>
-                  <span class="demo-pct demo-pct-2">0%</span>
-                </div>
-                <div class="demo-track"><div class="demo-fill demo-fill-2"></div></div>
-                <div class="demo-stats demo-stats-2">
-                  <span>0 / 8,400 files</span>
-                  <span>142.0 files/s</span>
-                  <span>0s</span>
-                  <span>~59s left</span>
-                </div>
-              </div>
-              <div class="demo-bar">
-                <div class="demo-header">
-                  <span class="demo-label">Processing images</span>
-                  <span class="demo-pct demo-pct-3">0%</span>
-                </div>
-                <div class="demo-track"><div class="demo-fill demo-fill-3"></div></div>
-                <div class="demo-stats demo-stats-3">
-                  <span>0 / 3,600 it</span>
-                  <span>55.2 it/s</span>
-                  <span>0s</span>
-                  <span>~65s left</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          </article>
         </section>
 
         <!-- How it works -->
         <section class="steps-section">
-          <h2 class="section-title">How it works</h2>
+          <div class="section-label">How it works</div>
           <div class="steps">
             <div class="step">
-              <div class="step-num">1</div>
+              <div class="step-num">01</div>
               <div class="step-body">
                 <h3>Add one line</h3>
                 <code>pip install fernsicht</code>
@@ -85,7 +94,7 @@
             </div>
             <div class="step-connector"></div>
             <div class="step">
-              <div class="step-num">2</div>
+              <div class="step-num">02</div>
               <div class="step-body">
                 <h3>Run your code</h3>
                 <p>A shareable link appears in your terminal. Send it to anyone.</p>
@@ -93,7 +102,7 @@
             </div>
             <div class="step-connector"></div>
             <div class="step">
-              <div class="step-num">3</div>
+              <div class="step-num">03</div>
               <div class="step-body">
                 <h3>Watch from anywhere</h3>
                 <p>Open the link on any device. Progress streams directly, peer-to-peer.</p>
@@ -113,31 +122,152 @@
         </section>
       </div>
 
-      <!-- Shared header (visible in both broadcaster and viewer) -->
-      <div id="header" class="hidden">
-        <div class="status-line">
-          <span id="connection-status" class="status connecting">connecting</span>
-          <span id="room-id" class="meta"></span>
-          <span id="peer-id" class="meta"></span>
-        </div>
-        <p id="connection-detail" class="connection-detail hidden"></p>
-      </div>
+      <!-- Viewer: observation shell -->
+      <div id="viewer-view" class="viewer-shell hidden">
+        <header class="viewer-header">
+          <div class="viewer-container">
+            <div class="brand">
+              <span class="brand-mark" aria-hidden="true"></span>
+              <span>Fernsicht</span>
+            </div>
+            <div class="header-state">
+              <a
+                class="support-btn"
+                href="https://ko-fi.com/fernsicht"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Support Fernsicht on Ko-fi"
+              >
+                <span class="support-btn-icon" aria-hidden="true">☕</span>
+                <span class="support-btn-label">Support</span>
+              </a>
+              <span id="connection-status" class="status status--connecting">
+                <span class="status-dot"></span>
+                <span id="connection-label">Connecting</span>
+              </span>
+            </div>
+          </div>
+        </header>
 
-      <!-- Broadcaster view -->
-      <div id="broadcaster-view" class="hidden">
-        <h2>Broadcaster</h2>
-        <button id="mock-btn" class="mock-btn">Mock Simulation</button>
-        <div id="broadcaster-log" class="log"></div>
-      </div>
+        <main class="viewer-main">
+          <div class="viewer-container">
+            <section class="card card--focus" id="observation-card">
+              <span class="corner corner--tl"></span>
+              <span class="corner corner--tr"></span>
+              <span class="corner corner--bl"></span>
+              <span class="corner corner--br"></span>
 
-      <!-- Viewer view -->
-      <div id="viewer-view" class="hidden">
-        <h2>Watching</h2>
-        <div id="bars-container"></div>
-        <p id="viewer-empty" class="hint">Waiting for progress updates...</p>
+              <span class="card-label">
+                <span>Observation</span>
+                <strong id="room-label">—</strong>
+              </span>
+
+              <div class="card-body">
+                <header class="card-head">
+                  <div>
+                    <h1 class="title" id="obs-title">Awaiting signal</h1>
+                    <p class="subtitle" id="obs-subtitle">Connecting to sender…</p>
+                  </div>
+                </header>
+
+                <div class="percent" id="percent-wrap" data-progress-tier="low">
+                  <span id="obs-percent">0</span><span class="percent-sign">%</span>
+                </div>
+
+                <div class="horizon-block">
+                  <div class="horizon">
+                    <div class="horizon-fill" id="obs-fill"></div>
+                    <div class="horizon-dot" id="obs-dot"></div>
+                  </div>
+                  <div class="scale">
+                    <span class="scale-item">
+                      <span class="scale-key">Started</span>
+                      <span class="scale-value" id="obs-start">—</span>
+                    </span>
+                    <span class="scale-item scale-item--end">
+                      <span class="scale-key">ETA</span>
+                      <span class="scale-value" id="obs-eta-clock">—</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="stats">
+                  <div class="stat stat--primary">
+                    <span class="stat-key">Time remaining</span>
+                    <div class="stat-value-row">
+                      <span class="stat-value-big" id="stat-eta">—</span>
+                    </div>
+                  </div>
+
+                  <div class="stat stat--secondary">
+                    <span class="stat-key">Rate</span>
+                    <div class="stat-value-row">
+                      <span class="stat-value-med" id="stat-rate">—</span>
+                      <span class="stat-value-unit" id="stat-rate-unit">items/s</span>
+                    </div>
+                  </div>
+
+                  <div class="stat stat--secondary">
+                    <span class="stat-key">Items</span>
+                    <div class="stat-value-row">
+                      <span class="stat-value-med" id="stat-items">—</span>
+                      <span class="stat-value-unit">
+                        <span class="stat-value-dim">of</span>
+                        <span id="stat-total">—</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="stat stat--tertiary">
+                    <span class="stat-key">Elapsed</span>
+                    <span class="stat-value" id="stat-elapsed">—</span>
+                  </div>
+                </div>
+
+                <aside class="completion-note" id="completion-note" hidden>
+                  <span>Your task ran peer-to-peer thanks to Fernsicht. Support development and help keep our servers and infrastructure alive and free for everyone.</span>
+                  <a
+                    class="completion-note-link"
+                    href="https://ko-fi.com/fernsicht"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >Support on Ko-fi →</a>
+                </aside>
+              </div>
+            </section>
+
+            <aside class="viewers">
+              <div class="viewers-head">
+                <span class="viewers-label">Viewers</span>
+                <span class="viewers-count" id="viewers-count">0</span>
+              </div>
+              <div class="viewers-list" id="viewers-list"></div>
+            </aside>
+          </div>
+        </main>
+
+        <footer class="viewer-footer">
+          <div class="viewer-container">
+            <div class="footer-group">
+              <button class="footer-action" id="copy-link-btn">Copy viewer link</button>
+              <span class="footer-item">
+                <span class="footer-key">peer</span>
+                <span class="footer-value" id="peer-value">—</span>
+              </span>
+            </div>
+            <div class="footer-group">
+              <span class="footer-item signal">
+                <span class="signal-dot" id="signal-dot"></span>
+                <span class="footer-value" id="signal-text">Connecting…</span>
+              </span>
+            </div>
+          </div>
+        </footer>
       </div>
     </div>
-    <footer class="site-footer">
+    <footer class="site-footer" id="site-footer">
       <a
         class="footer-link"
         href="https://ko-fi.com/fernsicht"

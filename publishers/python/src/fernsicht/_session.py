@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 DEFAULT_TIMEOUT_SEC = 5.0
@@ -16,41 +15,30 @@ class SessionBootstrapError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class SessionInfo:
+    """Response from ``POST /session``.
+
+    Note on ``sender_token`` vs ``sender_secret``:
+
+    - ``sender_secret`` is the V2 authentication credential. The SDK sends
+      it as ``Authorization: Bearer`` on ``GET /poll/{room}`` and as a body
+      field on ``POST /ticket/{id}/answer``. This is the only secret that
+      actually authenticates anything on the server.
+
+    - ``sender_token`` is a V1-era HMAC token still emitted by the server
+      for backward compatibility with old clients. The V2 SDK never sends
+      it to the server; it is kept in this dataclass only because the
+      wire format still carries it. A future release may drop the field.
+    """
+
     room_id: str
     sender_token: str
+    sender_secret: str
     viewer_url: str
     signaling_url: str
     expires_at: str | None
     expires_in: int | None
     max_viewers: int | None
-
-
-def derive_session_url(signaling_url: str) -> str:
-    """Derive HTTP(S) session endpoint from ws(s) signaling URL."""
-    split = urlsplit(signaling_url.strip())
-    if not split.scheme or not split.netloc:
-        raise SessionBootstrapError("signaling_url must be an absolute URL")
-
-    if split.scheme == "wss":
-        scheme = "https"
-    elif split.scheme == "ws":
-        scheme = "http"
-    elif split.scheme in {"https", "http"}:
-        scheme = split.scheme
-    else:
-        raise SessionBootstrapError(
-            f"unsupported signaling URL scheme '{split.scheme}'"
-        )
-
-    path = split.path or "/"
-    if path.endswith("/ws"):
-        session_path = f"{path[:-3]}/session" or "/session"
-    elif path == "/":
-        session_path = "/session"
-    else:
-        session_path = f"{path.rstrip('/')}/session"
-
-    return urlunsplit((scheme, split.netloc, session_path, "", ""))
+    poll_interval_hint: int | None
 
 
 def create_session(
@@ -88,16 +76,20 @@ def create_session(
 
     room_id = data.get("room_id")
     sender_token = data.get("sender_token")
+    sender_secret = data.get("sender_secret")
     viewer_url = data.get("viewer_url")
     signaling_url = data.get("signaling_url")
     expires_at = data.get("expires_at")
     expires_in = data.get("expires_in")
     max_viewers_value = data.get("max_viewers")
+    poll_interval_hint = data.get("poll_interval_hint")
 
     if not isinstance(room_id, str) or not room_id:
         raise SessionBootstrapError("session response missing room_id")
     if not isinstance(sender_token, str) or not sender_token:
         raise SessionBootstrapError("session response missing sender_token")
+    if not isinstance(sender_secret, str) or not sender_secret:
+        raise SessionBootstrapError("session response missing sender_secret")
     if not isinstance(viewer_url, str) or not viewer_url:
         raise SessionBootstrapError("session response missing viewer_url")
     if not isinstance(signaling_url, str) or not signaling_url:
@@ -108,13 +100,17 @@ def create_session(
         raise SessionBootstrapError("session response contains invalid expires_in")
     if max_viewers_value is not None and not isinstance(max_viewers_value, int):
         raise SessionBootstrapError("session response contains invalid max_viewers")
+    if poll_interval_hint is not None and not isinstance(poll_interval_hint, int):
+        raise SessionBootstrapError("session response contains invalid poll_interval_hint")
 
     return SessionInfo(
         room_id=room_id,
         sender_token=sender_token,
+        sender_secret=sender_secret,
         viewer_url=viewer_url,
         signaling_url=signaling_url,
         expires_at=expires_at,
         expires_in=expires_in,
         max_viewers=max_viewers_value,
+        poll_interval_hint=poll_interval_hint,
     )

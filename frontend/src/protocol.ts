@@ -6,7 +6,8 @@ export type MessageKind =
   | "progress"
   | "end"
   | "keepalive"
-  | "ready";
+  | "ready"
+  | "presence";
 
 export interface IdentityMessage {
   kind: "identity";
@@ -44,13 +45,19 @@ export interface ReadyMessage {
   kind: "ready";
 }
 
+export interface PresenceMessage {
+  kind: "presence";
+  names: string[];
+}
+
 export type FernsichtMessage =
   | IdentityMessage
   | StartMessage
   | ProgressMessage
   | EndMessage
   | KeepAliveMessage
-  | ReadyMessage;
+  | ReadyMessage
+  | PresenceMessage;
 
 function assertNonEmptyField(value: string, field: string): string {
   if (!value) {
@@ -122,47 +129,24 @@ export function parseMessage(raw: string): FernsichtMessage {
       if (parts.length !== 2) throw new Error("END message must have exactly 1 field");
       return { kind: "end", taskId: assertNonEmptyField(parts[1], "taskId") };
     }
+    case "V": {
+      // V|name1|name2|... — authoritative viewer presence list from the
+      // sender. Empty `V` (no names) is valid and means nobody.
+      return { kind: "presence", names: parts.slice(1).filter((s) => s.length > 0) };
+    }
     default:
       throw new Error(`Unknown message tag: ${tag}`);
   }
 }
 
-// --- Serializers (used by broadcaster) ---
-
-export function serializeIdentity(id: string): string {
-  return `ID|${id}`;
-}
-
-export function serializeStart(taskId: string, label: string): string {
-  return `START|${taskId}|${label}`;
-}
-
-export function serializeProgress(
-  taskId: string,
-  value: number,
-  stats?: {
-    elapsed?: number;
-    eta?: number;
-    n?: number;
-    total?: number;
-    rate?: number;
-    unit?: string;
-  },
-): string {
-  const f = (v: number | undefined) => v !== undefined ? v.toFixed(1) : "-";
-  const i = (v: number | undefined) => v !== undefined ? String(v) : "-";
-  const s = stats ?? {};
-  return `P|${taskId}|${value.toFixed(4)}|${f(s.elapsed)}|${f(s.eta)}|${i(s.n)}|${i(s.total)}|${f(s.rate)}|${s.unit ?? "it"}`;
-}
-
-export function serializeEnd(taskId: string): string {
-  return `END|${taskId}`;
-}
+// --- Serializers (used by viewer → sender over DataChannel) ---
 
 export function serializeKeepAlive(): string {
   return "K";
 }
 
-export function serializeReady(): string {
-  return "READY";
+export function serializeHello(name: string): string {
+  // Sanitize: strip pipes (no escape mechanism), truncate to 32 chars.
+  const clean = (name ?? "").replace(/\|/g, "").trim().slice(0, 32);
+  return `HELLO|${clean}`;
 }

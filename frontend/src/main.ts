@@ -1,30 +1,23 @@
-/** Fernsicht frontend entry point — WebRTC P2P progress tracking (V2 HTTP signaling). */
+/** Fernsicht frontend entry point — WebRTC P2P progress viewer. */
 
-import { ViewerPeer, SenderPeer } from "./peer";
-import { createSession } from "./signaling";
+import { ViewerPeer } from "./peer";
+import { parseMessage, serializeHello } from "./protocol";
 import {
-  parseMessage,
-  serializeEnd,
-  serializeProgress,
-  serializeStart,
-} from "./protocol";
-import {
-  appendBroadcasterLog,
   completeProgressBar,
   createProgressBar,
+  getLocalViewerName,
   setConnectionDetail,
   setConnectionStatus,
   setPeerId,
+  setPresence,
   setRoomId,
-  showBroadcasterView,
   showLanding,
   showViewerView,
   updateProgressBar,
 } from "./ui";
 
 interface FragmentParams {
-  room: string | null;
-  role: "broadcaster" | "viewer";
+  room: string;
 }
 
 function parseFragment(): FragmentParams | null {
@@ -32,17 +25,10 @@ function parseFragment(): FragmentParams | null {
   if (!hash) return null;
 
   const params = new URLSearchParams(hash);
-  const roleParam = params.get("role");
-  if (!roleParam) return null;
+  const room = params.get("room");
+  if (!room) return null;
 
-  const role: "broadcaster" | "viewer" =
-    roleParam === "broadcaster" ? "broadcaster" : "viewer";
-  const room = params.get("room") || null;
-
-  // Viewer requires a room ID; broadcaster creates its own
-  if (role === "viewer" && !room) return null;
-
-  return { room, role };
+  return { room };
 }
 
 function getServerUrl(): string {
@@ -67,6 +53,10 @@ function startViewer(serverUrl: string, roomId: string): void {
     onOpen: () => {
       setConnectionStatus("connected");
       setConnectionDetail("Connected. Waiting for live updates...", "info");
+      // Identify ourselves so the sender includes us in its presence
+      // broadcasts. Safe to call before any other frames — the sender
+      // handles HELLO on message receipt, not in a specific order.
+      peer.send(serializeHello(getLocalViewerName()));
     },
     onSignalingError: (_code, message, fatal) => {
       setConnectionStatus("signaling-error");
@@ -94,6 +84,9 @@ function startViewer(serverUrl: string, roomId: string): void {
             break;
           case "end":
             completeProgressBar(msg.taskId);
+            break;
+          case "presence":
+            setPresence(msg.names);
             break;
           case "keepalive":
           case "ready":
@@ -124,197 +117,90 @@ function startViewer(serverUrl: string, roomId: string): void {
   peer.start();
 }
 
-// --- Broadcaster ---
-
-async function startBroadcaster(serverUrl: string): Promise<void> {
-  showBroadcasterView();
-  setConnectionStatus("connecting");
-  setConnectionDetail("Creating session...", "info");
-
-  const mockBtn = document.getElementById("mock-btn") as HTMLButtonElement | null;
-  if (mockBtn) mockBtn.disabled = true;
-
-  let session;
-  try {
-    session = await createSession(serverUrl);
-  } catch (err) {
-    setConnectionStatus("signaling-error");
-    setConnectionDetail(`Failed to create session: ${err}`, "error");
-    return;
-  }
-
-  setRoomId(session.room_id);
-  setConnectionDetail("Polling for viewers...", "info");
-  appendBroadcasterLog(`Room: ${session.room_id}`);
-  appendBroadcasterLog(`Viewer URL: ${session.viewer_url}`);
-
-  const peer = new SenderPeer(
-    serverUrl,
-    session.room_id,
-    session.sender_secret,
-    session.poll_interval_hint * 1000,
-    {
-      onOpen: () => {
-        setConnectionStatus("connected");
-        setConnectionDetail("Viewer connected. DataChannel open.", "info");
-        appendBroadcasterLog("DataChannel open — ready to send");
-        if (mockBtn) mockBtn.disabled = false;
-      },
-      onSignalingError: (_code, message, fatal) => {
-        setConnectionStatus("signaling-error");
-        setConnectionDetail(message, fatal ? "error" : "warning");
-      },
-      onMessage: (raw) => {
-        appendBroadcasterLog(`< ${raw}`);
-      },
-      onClose: () => {
-        setConnectionStatus("disconnected");
-        setConnectionDetail("Viewer disconnected.", "warning");
-        if (mockBtn) mockBtn.disabled = true;
-      },
-      onStateChange: (state) => {
-        appendBroadcasterLog(`State: ${state}`);
-        if (state === "connecting") {
-          setConnectionStatus("connecting");
-          setConnectionDetail("Handshaking with viewer...", "info");
-        } else if (state === "signaling-joined") {
-          setConnectionStatus("connecting");
-          setConnectionDetail("Polling for viewers...", "info");
-        }
-      },
-    },
-  );
-
-  peer.start();
-
-  if (mockBtn) {
-    mockBtn.addEventListener("click", () => runMockSimulation(peer));
-  }
-}
-
-function runMockSimulation(peer: SenderPeer): void {
-  const taskCount = 1 + Math.floor(Math.random() * 3);
-  const labels = [
-    "Training model",
-    "Downloading dataset",
-    "Processing images",
-    "Compiling shaders",
-  ];
-
-  const tasks: Array<{
-    id: string;
-    label: string;
-    progress: number;
-    rate: number;
-    total: number;
-    n: number;
-    startTime: number;
-  }> = [];
-
-  const now = performance.now() / 1000;
-  for (let i = 0; i < taskCount; i++) {
-    const id = crypto.randomUUID().slice(0, 8);
-    const label = labels[i % labels.length];
-    const total = 200 + Math.floor(Math.random() * 800); // 200-1000 items
-    const rate = 0.01 + Math.random() * 0.04;
-
-    tasks.push({ id, label, progress: 0, rate, total, n: 0, startTime: now });
-
-    const startMsg = serializeStart(id, label);
-    peer.send(startMsg);
-    appendBroadcasterLog(`> ${startMsg}`);
-  }
-
-  const interval = setInterval(() => {
-    let allDone = true;
-    const elapsed = performance.now() / 1000;
-
-    for (const task of tasks) {
-      if (task.progress >= 1) continue;
-      allDone = false;
-
-      task.progress = Math.min(1, task.progress + task.rate);
-      task.n = Math.round(task.progress * task.total);
-
-      if (task.progress >= 1) {
-        task.n = task.total;
-        const endMsg = serializeEnd(task.id);
-        peer.send(endMsg);
-        appendBroadcasterLog(`> ${endMsg}`);
-      } else {
-        const taskElapsed = elapsed - task.startTime;
-        const itemRate = taskElapsed > 0 ? task.n / taskElapsed : 0;
-        const remaining = task.total - task.n;
-        const eta = itemRate > 0 ? remaining / itemRate : 0;
-
-        const pMsg = serializeProgress(task.id, task.progress, {
-          elapsed: taskElapsed,
-          eta,
-          n: task.n,
-          total: task.total,
-          rate: itemRate,
-          unit: "it",
-        });
-        peer.send(pMsg);
-        appendBroadcasterLog(`> ${pMsg}`);
-      }
-    }
-
-    if (allDone) clearInterval(interval);
-  }, 200);
-}
-
 // --- Demo animation for landing page ---
 
 function startDemoAnimation(): void {
-  const demos = [
-    { idx: 1, total: 1200, unit: "epochs", rate: 18.3, delay: 0 },
-    { idx: 2, total: 8400, unit: "files", rate: 142.0, delay: 2 },
-    { idx: 3, total: 3600, unit: "it", rate: 55.2, delay: 4 },
+  const tasks = [
+    { label: "Training model",      total: 1200, rate: 18.3,  unit: "ep" },
+    { label: "Downloading dataset", total: 8400, rate: 142.0, unit: "files" },
+    { label: "Processing images",   total: 3600, rate: 55.2,  unit: "it" },
   ];
 
   const CYCLE_SEC = 10;
-  const FILL_FRAC = 0.85; // bar fills in 85% of cycle, rest is pause
+  const FILL_FRAC = 0.88; // reach 100% at 88% of cycle, hold briefly
 
-  function update() {
+  const titleEl    = document.getElementById("demo-title");
+  const subtitleEl = document.getElementById("demo-subtitle");
+  const pctNumEl   = document.getElementById("demo-pct-num");
+  const wrapEl     = document.getElementById("demo-percent-wrap");
+  const fillEl     = document.getElementById("demo-fill") as HTMLElement | null;
+  const dotEl      = document.getElementById("demo-dot") as HTMLElement | null;
+  const rateEl     = document.getElementById("demo-rate");
+  const unitEl     = document.getElementById("demo-unit");
+  const elapsedEl  = document.getElementById("demo-elapsed");
+  const etaEl      = document.getElementById("demo-eta");
+
+  if (!titleEl || !fillEl || !dotEl) return;
+
+  let taskIdx = 0;
+  let cycleStart = performance.now() / 1000;
+
+  function applyTask(idx: number) {
+    const t = tasks[idx];
+    if (titleEl) titleEl.textContent = t.label;
+    if (unitEl) unitEl.textContent = `${t.unit}/s`;
+    if (rateEl) rateEl.textContent = t.rate >= 10 ? t.rate.toFixed(0) : t.rate.toFixed(1);
+  }
+  applyTask(taskIdx);
+
+  function tick() {
     const now = performance.now() / 1000;
-
-    for (const d of demos) {
-      const t = ((now - d.delay) % CYCLE_SEC) / CYCLE_SEC;
-      const progress = Math.min(1, t / FILL_FRAC);
-
-      const pctEl = document.querySelector(`.demo-pct-${d.idx}`) as HTMLElement | null;
-      const statsEl = document.querySelector(`.demo-stats-${d.idx}`) as HTMLElement | null;
-      if (!pctEl || !statsEl) continue;
-
-      const pct = Math.round(progress * 100);
-      pctEl.textContent = `${pct}%`;
-
-      const n = Math.round(progress * d.total);
-      const elapsed = progress * (d.total / d.rate);
-      const remaining = d.total - n;
-      const eta = d.rate > 0 ? remaining / d.rate : 0;
-
-      const spans = statsEl.querySelectorAll("span");
-      if (spans.length >= 4) {
-        spans[0].textContent = `${n.toLocaleString()} / ${d.total.toLocaleString()} ${d.unit}`;
-        spans[1].textContent = `${d.rate.toFixed(1)} ${d.unit}/s`;
-        spans[2].textContent = formatDemoTime(elapsed);
-        spans[3].textContent = progress >= 1 ? "" : `~${formatDemoTime(eta)} left`;
-      }
+    let cycleElapsed = now - cycleStart;
+    if (cycleElapsed >= CYCLE_SEC) {
+      cycleStart = now;
+      taskIdx = (taskIdx + 1) % tasks.length;
+      applyTask(taskIdx);
+      cycleElapsed = 0;
     }
 
-    requestAnimationFrame(update);
+    const t = tasks[taskIdx];
+    const progress = Math.min(1, cycleElapsed / CYCLE_SEC / FILL_FRAC);
+    const pct = Math.round(progress * 100);
+    const n = Math.round(progress * t.total);
+    const totalElapsed = progress * (t.total / t.rate);
+    const remaining = t.total - n;
+    const etaSec = t.rate > 0 ? remaining / t.rate : 0;
+
+    if (pctNumEl) pctNumEl.textContent = String(pct);
+    if (wrapEl) wrapEl.dataset.progressTier = demoTier(pct);
+    fillEl!.style.width = `${pct}%`;
+    dotEl!.style.left = `${pct}%`;
+    if (subtitleEl) subtitleEl.textContent = `${fmtNum(n)} / ${fmtNum(t.total)} ${t.unit}`;
+    if (elapsedEl) elapsedEl.textContent = formatDemoTime(totalElapsed);
+    if (etaEl) etaEl.textContent = progress >= 1 ? "done" : formatDemoTime(etaSec);
+
+    requestAnimationFrame(tick);
   }
 
-  requestAnimationFrame(update);
+  requestAnimationFrame(tick);
+}
+
+function demoTier(pct: number): string {
+  if (pct >= 100) return "done";
+  if (pct >= 70) return "high";
+  if (pct >= 35) return "mid";
+  return "low";
+}
+
+function fmtNum(n: number): string {
+  return n.toLocaleString("en-US").replace(/,/g, " ");
 }
 
 function formatDemoTime(seconds: number): string {
   const s = Math.round(seconds);
-  if (s < 60) return `${s}s`;
+  if (s < 60) return `0:${String(s).padStart(2, "0")}`;
   const m = Math.floor(s / 60);
-  return `${m}m ${s % 60}s`;
+  return `${m}:${String(s % 60).padStart(2, "0")}`;
 }
 
 // --- Entry ---
@@ -328,11 +214,7 @@ function main(): void {
   }
 
   const serverUrl = getServerUrl();
-  if (params.role === "broadcaster") {
-    startBroadcaster(serverUrl);
-  } else {
-    startViewer(serverUrl, params.room!);
-  }
+  startViewer(serverUrl, params.room);
 }
 
 main();

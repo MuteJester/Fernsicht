@@ -125,38 +125,6 @@ def test_bootstrap_failure_raises_by_default(monkeypatch: pytest.MonkeyPatch):
         FernsichtBar(total=1, disable=False)
 
 
-def test_bootstrap_failure_allows_local_fallback(monkeypatch: pytest.MonkeyPatch):
-    class DummyTransport:
-        def __init__(self, *args, **kwargs):
-            self.closed = False
-
-        def post(self, **kwargs):
-            return None
-
-        def send_error(self, **kwargs):
-            return None
-
-        def close(self, **kwargs):
-            self.closed = True
-
-    def _raise_session_error(
-        *,
-        session_url: str,
-        timeout_sec: float = 5.0,
-        api_key: str | None = None,
-        max_viewers: int | None = None,
-    ):
-        raise SessionBootstrapError("boom")
-
-    monkeypatch.setenv("FERNSICHT_ALLOW_LOCAL_FALLBACK", "true")
-    monkeypatch.setattr(blick_module, "Transport", DummyTransport)
-    monkeypatch.setattr(blick_module, "create_session", _raise_session_error)
-
-    bar = FernsichtBar(total=1, disable=False)
-    assert "#room=" in bar.url
-    bar.close()
-
-
 def test_max_viewers_validation() -> None:
     with pytest.raises(ValueError, match="max_viewers must be >= 1"):
         FernsichtBar(total=1, disable=False, max_viewers=0)
@@ -201,11 +169,13 @@ def test_multi_viewer_alias_forwards_to_session(
         return SessionInfo(
             room_id="abc12345",
             sender_token="tok",
+            sender_secret="secret",
             viewer_url="https://app.fernsicht.space/#room=abc12345&role=viewer",
-            signaling_url="wss://signal.fernsicht.space/ws",
+            signaling_url="https://signal.fernsicht.space",
             expires_at=None,
             expires_in=None,
             max_viewers=max_viewers,
+            poll_interval_hint=25,
         )
 
     monkeypatch.setattr(blick_module, "Transport", DummyTransport)

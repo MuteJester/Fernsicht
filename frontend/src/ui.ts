@@ -1,103 +1,153 @@
-/** DOM rendering for Fernsicht — supports multiple concurrent progress bars. */
+/** DOM rendering for Fernsicht viewer — single observation card. */
 
 const $ = (id: string) => document.getElementById(id)!;
-const COMPLETED_BAR_REMOVE_DELAY_MS = 5000;
-const MAX_LOG_LINES = 400;
 
-// --- View switching ---
+// --- DOM accessors (lazy; DOM always present, `hidden` class toggles) ---
+const el = {
+  landing:        () => $("landing"),
+  viewer:         () => $("viewer-view"),
+  siteFooter:     () => document.getElementById("site-footer"),
+  completionNote: () => $("completion-note"),
+  status:         () => $("connection-status"),
+  statusLabel:   () => $("connection-label"),
+  roomLabel:     () => $("room-label"),
+  peerValue:     () => $("peer-value"),
+  signalText:    () => $("signal-text"),
+  signalDot:     () => $("signal-dot"),
+  title:         () => $("obs-title"),
+  subtitle:      () => $("obs-subtitle"),
+  percent:       () => $("obs-percent"),
+  percentWrap:   () => $("percent-wrap"),
+  fill:          () => $("obs-fill"),
+  dot:           () => $("obs-dot"),
+  startClock:    () => $("obs-start"),
+  etaClock:      () => $("obs-eta-clock"),
+  statEta:       () => $("stat-eta"),
+  statRate:      () => $("stat-rate"),
+  statRateUnit:  () => $("stat-rate-unit"),
+  statItems:     () => $("stat-items"),
+  statTotal:     () => $("stat-total"),
+  statElapsed:   () => $("stat-elapsed"),
+  copyBtn:       () => $("copy-link-btn") as HTMLButtonElement,
+  viewersCount:  () => $("viewers-count"),
+  viewersList:   () => $("viewers-list"),
+};
+
+let activeTaskId: string | null = null;
+let viewerInited = false;
+
+interface ObsState {
+  startedAt: number;
+}
+let obs: ObsState | null = null;
+let completedResetTimer: ReturnType<typeof setTimeout> | null = null;
+let completionNoteFadeTimer: ReturnType<typeof setTimeout> | null = null;
+const COMPLETION_HOLD_MS = 15000;
+
+// --- View switching -------------------------------------------------------
 
 export function showLanding(): void {
-  $("landing").classList.remove("hidden");
-  $("header").classList.add("hidden");
-  $("broadcaster-view").classList.add("hidden");
-  $("viewer-view").classList.add("hidden");
-  setConnectionDetail(null);
-}
-
-export function showBroadcasterView(): void {
-  $("landing").classList.add("hidden");
-  $("header").classList.remove("hidden");
-  $("broadcaster-view").classList.remove("hidden");
-  $("viewer-view").classList.add("hidden");
-  setConnectionDetail(null);
+  el.landing().classList.remove("hidden");
+  el.viewer().classList.add("hidden");
+  el.siteFooter()?.classList.remove("hidden");
 }
 
 export function showViewerView(): void {
-  $("landing").classList.add("hidden");
-  $("header").classList.remove("hidden");
-  $("broadcaster-view").classList.add("hidden");
-  $("viewer-view").classList.remove("hidden");
-  setConnectionDetail(null);
-  updateViewerEmptyState();
+  el.landing().classList.add("hidden");
+  el.viewer().classList.remove("hidden");
+  // The viewer has its own support pill (header) and contextual ask on
+  // completion; the fixed Ko-fi bar is landing-only.
+  el.siteFooter()?.classList.add("hidden");
+  initViewerOnce();
 }
 
-// --- Connection status ---
+// --- Connection status ----------------------------------------------------
 
-export function setConnectionStatus(
-  status: "connecting" | "connected" | "disconnected" | "signaling-error",
-): void {
-  const el = $("connection-status");
-  el.textContent = status;
-  el.className = `status ${status}`;
+type Status = "connecting" | "connected" | "disconnected" | "signaling-error";
+
+export function setConnectionStatus(status: Status): void {
+  const s = el.status();
+  const label = el.statusLabel();
+  const sDot = el.signalDot();
+  const sText = el.signalText();
+  s.className = "status";
+
+  switch (status) {
+    case "connecting":
+      s.classList.add("status--connecting");
+      label.textContent = "Connecting";
+      sDot.className = "signal-dot signal-dot--amber";
+      sText.textContent = "Connecting…";
+      break;
+    case "connected":
+      s.classList.add("status--live");
+      label.textContent = activeTaskId ? "Live" : "Standby";
+      sDot.className = "signal-dot";
+      sText.textContent = "Signal stable";
+      break;
+    case "disconnected":
+      s.classList.add("status--disconnected");
+      label.textContent = "Offline";
+      sDot.className = "signal-dot signal-dot--red";
+      sText.textContent = "Disconnected";
+      break;
+    case "signaling-error":
+      s.classList.add("status--error");
+      label.textContent = "Error";
+      sDot.className = "signal-dot signal-dot--red";
+      sText.textContent = "Signaling error";
+      break;
+  }
 }
 
 export function setRoomId(roomId: string): void {
-  $("room-id").textContent = `Room: ${roomId}`;
+  const short = roomId.length > 12 ? roomId.slice(0, 8) : roomId;
+  el.roomLabel().textContent = short;
 }
 
 export function setPeerId(id: string): void {
-  $("peer-id").textContent = `Peer: ${id}`;
+  el.peerValue().textContent = id;
 }
 
 export function setConnectionDetail(
   message: string | null,
-  tone: "info" | "warning" | "error" = "info",
+  _tone: "info" | "warning" | "error" = "info",
 ): void {
-  const el = $("connection-detail");
-  if (message === null || message.trim() === "") {
-    el.textContent = "";
-    el.className = "connection-detail hidden";
-    return;
-  }
-
-  el.textContent = message;
-  el.className = `connection-detail ${tone}`;
+  // Surface pre-handshake messages as the card subtitle. Once a task is
+  // active, preserve the task's own subtitle.
+  if (activeTaskId) return;
+  el.subtitle().textContent = message ?? "";
 }
 
-// --- Viewer: multi-bar progress rendering ---
-
-const activeBars = new Map<string, HTMLElement>();
+// --- Observation (single active task) -------------------------------------
 
 export function createProgressBar(taskId: string, label: string): void {
-  const container = $("bars-container");
-  const existing = activeBars.get(taskId);
-  if (existing) {
-    existing.remove();
-    activeBars.delete(taskId);
+  if (completedResetTimer) {
+    clearTimeout(completedResetTimer);
+    completedResetTimer = null;
   }
+  hideCompletionNote();
 
-  const bar = document.createElement("div");
-  bar.className = "task-bar";
-  bar.dataset.taskId = taskId;
-  bar.innerHTML = `
-    <div class="task-header">
-      <span class="task-label">${escapeHtml(label)}</span>
-      <span class="progress-pct">0%</span>
-    </div>
-    <div class="progress-bar">
-      <div class="progress-fill" style="width: 0%"></div>
-    </div>
-    <div class="task-stats">
-      <span class="stat stat-count"></span>
-      <span class="stat stat-rate"></span>
-      <span class="stat stat-elapsed"></span>
-      <span class="stat stat-eta"></span>
-    </div>
-  `;
+  activeTaskId = taskId;
+  obs = { startedAt: Date.now() };
 
-  container.appendChild(bar);
-  activeBars.set(taskId, bar);
-  updateViewerEmptyState();
+  el.title().textContent = label;
+  el.subtitle().textContent = "Starting…";
+  el.percent().textContent = "0";
+  el.percentWrap().dataset.progressTier = "low";
+  el.fill().style.width = "0%";
+  el.dot().style.left = "0%";
+  el.startClock().textContent = formatClock(obs.startedAt);
+  el.etaClock().textContent = "—";
+  el.statEta().textContent = "—";
+  el.statRate().textContent = "—";
+  el.statRateUnit().textContent = "items/s";
+  el.statItems().textContent = "—";
+  el.statTotal().textContent = "—";
+  el.statElapsed().textContent = "0:00";
+
+  const lbl = el.statusLabel();
+  if (lbl.textContent === "Standby") lbl.textContent = "Live";
 }
 
 export function updateProgressBar(
@@ -112,127 +162,268 @@ export function updateProgressBar(
     unit: string;
   },
 ): void {
-  const bar = activeBars.get(taskId);
-  if (!bar) return;
+  // Single-observation model: adopt an unseen task if none is active,
+  // otherwise ignore background-task updates.
+  if (!activeTaskId) createProgressBar(taskId, taskId);
+  if (taskId !== activeTaskId) return;
 
-  const percent = Math.min(100, Math.round(value * 100));
-  const fill = bar.querySelector(".progress-fill") as HTMLElement;
-  const pct = bar.querySelector(".progress-pct") as HTMLElement;
-
-  fill.style.width = `${percent}%`;
-  fill.style.background = progressGradient(value);
-  pct.textContent = `${percent}%`;
+  const pct = Math.max(0, Math.min(100, value * 100));
+  el.percent().textContent = String(Math.floor(pct));
+  el.fill().style.width = `${pct}%`;
+  el.dot().style.left = `${pct}%`;
+  el.percentWrap().dataset.progressTier = tierFor(pct);
 
   if (stats) {
-    const countEl = bar.querySelector(".stat-count") as HTMLElement;
-    const rateEl = bar.querySelector(".stat-rate") as HTMLElement;
-    const elapsedEl = bar.querySelector(".stat-elapsed") as HTMLElement;
-    const etaEl = bar.querySelector(".stat-eta") as HTMLElement;
+    const unit = stats.unit || "items";
+    el.statRateUnit().textContent = `${unit}/s`;
 
-    if (stats.n !== null && stats.total !== null) {
-      countEl.textContent = `${stats.n.toLocaleString()} / ${stats.total.toLocaleString()} ${stats.unit}`;
-    } else if (stats.n !== null) {
-      countEl.textContent = `${stats.n.toLocaleString()} ${stats.unit}`;
-    }
-
+    if (stats.n !== null) el.statItems().textContent = fmtNum(stats.n);
+    if (stats.total !== null) el.statTotal().textContent = fmtNum(stats.total);
     if (stats.rate !== null) {
-      rateEl.textContent = `${stats.rate >= 10 ? stats.rate.toFixed(0) : stats.rate.toFixed(1)} ${stats.unit}/s`;
+      const r = stats.rate;
+      el.statRate().textContent = r >= 10 ? r.toFixed(0) : r.toFixed(1);
     }
-
-    if (stats.elapsed !== null) {
-      elapsedEl.textContent = formatDuration(stats.elapsed);
-    }
-
+    if (stats.elapsed !== null) el.statElapsed().textContent = formatDuration(stats.elapsed);
     if (stats.eta !== null) {
-      etaEl.textContent = `~${formatDuration(stats.eta)} left`;
+      el.statEta().textContent = formatDuration(stats.eta);
+      el.etaClock().textContent = formatClock(Date.now() + stats.eta * 1000);
+    }
+
+    if (stats.total !== null && stats.n !== null) {
+      el.subtitle().textContent = `${fmtNum(stats.n)} / ${fmtNum(stats.total)} ${unit}`;
     } else {
-      etaEl.textContent = "";
+      el.subtitle().textContent = "Running";
     }
   }
 }
 
 export function completeProgressBar(taskId: string): void {
-  const bar = activeBars.get(taskId);
-  if (!bar) return;
+  if (taskId !== activeTaskId) return;
 
-  const fill = bar.querySelector(".progress-fill") as HTMLElement;
-  const pct = bar.querySelector(".progress-pct") as HTMLElement;
+  el.percent().textContent = "100";
+  el.percentWrap().dataset.progressTier = "done";
+  el.fill().style.width = "100%";
+  el.dot().style.left = "100%";
+  el.statEta().textContent = "done";
+  el.subtitle().textContent = "Completed";
 
-  fill.style.width = "100%";
-  fill.classList.add("done");
-  pct.textContent = "100%";
-  bar.classList.add("completed");
+  showCompletionNote();
 
-  setTimeout(() => {
-    if (activeBars.get(taskId) !== bar) return;
-    activeBars.delete(taskId);
-    bar.remove();
-    updateViewerEmptyState();
-  }, COMPLETED_BAR_REMOVE_DELAY_MS);
+  if (completedResetTimer) clearTimeout(completedResetTimer);
+  completedResetTimer = setTimeout(() => {
+    activeTaskId = null;
+    obs = null;
+    resetToIdle();
+  }, COMPLETION_HOLD_MS);
 }
 
-// --- Broadcaster: log ---
+function resetToIdle(): void {
+  hideCompletionNote();
+  el.title().textContent = "Awaiting signal";
+  el.subtitle().textContent = "Ready for the next observation";
+  el.percent().textContent = "0";
+  el.percentWrap().dataset.progressTier = "low";
+  el.fill().style.width = "0%";
+  el.dot().style.left = "0%";
+  el.startClock().textContent = "—";
+  el.etaClock().textContent = "—";
+  el.statEta().textContent = "—";
+  el.statRate().textContent = "—";
+  el.statItems().textContent = "—";
+  el.statTotal().textContent = "—";
+  el.statElapsed().textContent = "—";
 
-export function appendBroadcasterLog(message: string): void {
-  const log = $("broadcaster-log");
-  const line = document.createElement("div");
-  line.className = "log-line";
-  line.textContent = message;
-  log.appendChild(line);
+  const lbl = el.statusLabel();
+  if (lbl.textContent === "Live") lbl.textContent = "Standby";
+}
 
-  while (log.childElementCount > MAX_LOG_LINES) {
-    log.removeChild(log.firstElementChild!);
+// --- Completion note (contextual support ask) ----------------------------
+
+function showCompletionNote(): void {
+  const note = el.completionNote();
+  if (completionNoteFadeTimer) {
+    clearTimeout(completionNoteFadeTimer);
+    completionNoteFadeTimer = null;
   }
-  log.scrollTop = log.scrollHeight;
+  note.classList.remove("is-hiding");
+  note.removeAttribute("hidden");
+  // Start fading out slightly before the card's reset so the visual
+  // transitions don't collide.
+  completionNoteFadeTimer = setTimeout(() => {
+    note.classList.add("is-hiding");
+  }, COMPLETION_HOLD_MS - 500);
 }
 
-// --- Utility ---
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
+function hideCompletionNote(): void {
+  if (completionNoteFadeTimer) {
+    clearTimeout(completionNoteFadeTimer);
+    completionNoteFadeTimer = null;
+  }
+  const note = el.completionNote();
+  note.classList.remove("is-hiding");
+  note.setAttribute("hidden", "");
 }
 
-function progressGradient(t: number): string {
-  // t: 0.0 → 1.0
-  // 0.0  = #30363d (dark grey)
-  // 0.5  = #238636 (mid green)
-  // 1.0  = #3fb950 (bright green)
-  const clamp = Math.max(0, Math.min(1, t));
+// --- Viewer chrome init ---------------------------------------------------
 
-  let r: number, g: number, b: number;
-  if (clamp < 0.5) {
-    const p = clamp / 0.5;
-    r = Math.round(lerp(0x30, 0x23, p));
-    g = Math.round(lerp(0x36, 0x86, p));
-    b = Math.round(lerp(0x3d, 0x36, p));
-  } else {
-    const p = (clamp - 0.5) / 0.5;
-    r = Math.round(lerp(0x23, 0x3f, p));
-    g = Math.round(lerp(0x86, 0xb9, p));
-    b = Math.round(lerp(0x36, 0x50, p));
+function initViewerOnce(): void {
+  if (viewerInited) return;
+  viewerInited = true;
+
+  el.copyBtn().addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      const btn = el.copyBtn();
+      const orig = btn.textContent ?? "Copy viewer link";
+      btn.textContent = "Copied";
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.classList.remove("copied");
+      }, 1500);
+    } catch (err) {
+      console.warn("Copy failed:", err);
+    }
+  });
+}
+
+/** Sender→viewers authoritative presence list. Replaces the viewers strip. */
+export function setPresence(names: string[]): void {
+  const list = el.viewersList();
+  list.innerHTML = "";
+
+  const local = getLocalViewerName();
+  for (const name of names) {
+    const isMe = name === local;
+    const viewerEl = document.createElement("div");
+    viewerEl.className = isMe ? "viewer viewer--me" : "viewer";
+    viewerEl.title = isMe ? `${name} (you)` : name;
+    viewerEl.innerHTML = `
+      <div class="viewer-avatar">${makeAvatar(name)}</div>
+      <div class="viewer-name">${escapeHtml(name)}</div>
+    `;
+    list.appendChild(viewerEl);
+  }
+  el.viewersCount().textContent = String(names.length);
+}
+
+export function getLocalViewerName(): string {
+  const KEY = "fernsicht.viewer.name";
+  let name = sessionStorage.getItem(KEY);
+  if (!name) {
+    const pool = [
+      "vega", "orion", "lyra", "sirius", "nova", "iris", "atlas",
+      "rigel", "altair", "cassia", "aurora", "deneb", "polaris",
+      "mira", "pavo", "cosmo",
+    ];
+    name = pool[Math.floor(Math.random() * pool.length)];
+    sessionStorage.setItem(KEY, name);
+  }
+  return name;
+}
+
+// --- Procedural wave-pixel avatar -----------------------------------------
+
+function hashStr(s: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h;
+}
+
+function mulberry32(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makeAvatar(name: string): string {
+  const size = 40;
+  const pixel = 2;
+  const pad = 2;
+  const gridN = Math.floor((size - pad * 2) / pixel);
+  const offset = (size - gridN * pixel) / 2;
+
+  const rng = mulberry32(hashStr(name));
+  const phase = rng() * Math.PI * 2;
+  const amplitude = 0.12 + rng() * 0.18;
+  const frequency = 1.4 + rng() * 1.8;
+  const thickness = 1.0 + rng() * 1.2;
+  const palette = ["#3fb950", "#52c37a", "#7dce8a", "#4fb89a", "#88c670"];
+  const color = palette[hashStr(name) % palette.length];
+
+  const cx = size / 2, cy = size / 2;
+  const circleR = size / 2 - 0.5;
+
+  let pixels = "";
+  for (let gy = 0; gy < gridN; gy++) {
+    for (let gx = 0; gx < gridN; gx++) {
+      const px = offset + gx * pixel + pixel / 2;
+      const py = offset + gy * pixel + pixel / 2;
+      const dx = px - cx, dy = py - cy;
+      const distCenter = Math.sqrt(dx * dx + dy * dy);
+      if (distCenter > circleR - 0.5) continue;
+
+      const t = (px - cx) / (size / 2);
+      const waveY = cy + Math.sin(t * Math.PI * frequency + phase) * amplitude * size;
+      const distWave = Math.abs(py - waveY);
+
+      if (distWave < pixel * thickness) {
+        const falloff = 1 - distWave / (pixel * thickness);
+        const edgeFade = Math.min(1, (circleR - distCenter) / 3.5);
+        const opacity = (0.35 + falloff * 0.6) * edgeFade;
+        if (opacity > 0.05) {
+          pixels += `<rect x="${offset + gx * pixel}" y="${offset + gy * pixel}" width="${pixel}" height="${pixel}" fill="${color}" opacity="${opacity.toFixed(2)}"/>`;
+        }
+      }
+    }
   }
 
-  return `rgb(${r}, ${g}, ${b})`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${cx}" cy="${cy}" r="${circleR}" fill="#141821" stroke="#2a2f3a" stroke-width="1"/>
+    ${pixels}
+  </svg>`;
+}
+
+// --- Utilities ------------------------------------------------------------
+
+function tierFor(pct: number): string {
+  if (pct >= 100) return "done";
+  if (pct >= 70) return "high";
+  if (pct >= 35) return "mid";
+  return "low";
+}
+
+function fmtNum(n: number): string {
+  return n.toLocaleString("en-US").replace(/,/g, " ");
+}
+
+function formatClock(ts: number): string {
+  const d = new Date(ts);
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function formatDuration(seconds: number): string {
-  const s = Math.round(seconds);
-  if (s < 60) return `${s}s`;
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `0:${String(s).padStart(2, "0")}`;
   const m = Math.floor(s / 60);
   const rem = s % 60;
-  if (m < 60) return `${m}m ${rem}s`;
+  if (m < 60) return `${m}:${String(rem).padStart(2, "0")}`;
   const h = Math.floor(m / 60);
   const remM = m % 60;
-  return `${h}h ${remM}m`;
+  return `${h}:${String(remM).padStart(2, "0")}:${String(rem).padStart(2, "0")}`;
 }
 
 function escapeHtml(text: string): string {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
-}
-
-function updateViewerEmptyState(): void {
-  const empty = $("viewer-empty");
-  empty.classList.toggle("hidden", activeBars.size > 0);
 }

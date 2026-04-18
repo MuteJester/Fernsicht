@@ -1,137 +1,162 @@
-# Fernsicht Wire Protocol v2 (WebRTC)
+# Fernsicht Wire Protocol V2
 
-This document defines the live progress protocol used by Fernsicht publishers and the browser viewer.
+This document describes the Fernsicht protocol as implemented by the V2
+connectionless signaling server, the Python SDK, and the browser viewer.
 
-## 1) Architecture
+## 1. Architecture
 
-1. Sender (Python wrapper) and Viewer (browser) connect to the signaling server over WebSocket.
-2. Signaling server matches peers by room and relays SDP/ICE signaling messages.
-3. Sender and Viewer establish a WebRTC DataChannel.
-4. Progress messages flow over DataChannel (P2P). The signaling server is not in the data path after handshake.
+1. Sender (Python SDK) calls `POST /session` on the signaling server. The
+   server registers a room and returns a `sender_secret`.
+2. Sender polls `GET /poll/{room_id}?secret=…` on a fixed interval.
+3. Viewer (browser) creates a WebRTC offer locally, then `POST /watch` with
+   the offer. The server returns a ticket ID.
+4. Sender's next poll returns the pending ticket with the viewer's offer.
+5. Sender creates an answer, `POST /ticket/{id}/answer` with the answer SDP.
+6. Viewer polls `GET /ticket/{id}/answer` until it receives the answer.
+7. Both sides exchange ICE candidates via `POST|GET /ticket/{id}/ice/sender`
+   and `POST|GET /ticket/{id}/ice/viewer`.
+8. WebRTC DataChannel opens. Progress data flows P2P, bypassing the server.
 
-## Session Bootstrap (Recommended UX)
+There is no persistent socket on either side. The server holds only the room
+registry and short-lived tickets (default TTL 25s).
 
-Before joining `/ws`, a publisher can create a session via:
+## 2. HTTP Endpoints
 
-```
-POST /session
-```
+All endpoints are on the signaling server (default `https://signal.fernsicht.space`).
 
-Response JSON includes:
-- `room_id`
-- `sender_token`
-- `viewer_url`
-- `signaling_url`
-- `expires_at` / `expires_in`
-- `max_viewers`
+### `POST /session`
 
-Optional request body:
+Create a new room. Optional JSON body:
 
 ```json
 {"max_viewers": 4}
 ```
 
-## 2) Signaling (WebSocket)
+Optional header: `X-Fernsicht-Api-Key` if the server requires it.
 
-Endpoint:
-
-```text
-GET /ws
-```
-
-First frame must be JOIN:
-
-```text
-JOIN|<room_id>|SENDER
-JOIN|<room_id>|SENDER|<token>   # when server auth is enabled
-JOIN|<room_id>|VIEWER
-```
-
-Rules:
-
-- `room_id` character set: `[A-Za-z0-9_-]`
-- `room_id` length: server-configurable (`ROOM_ID_MIN_LEN`..`ROOM_ID_MAX_LEN`)
-- server may send:
-  - `ERROR|ROLE_TAKEN`
-  - `ERROR|SERVER_BUSY`
-  - policy close on invalid joins
-
-Server handshake helper:
-
-- server sends `READY|<viewer_id>` to `SENDER` when a viewer is present
-
-SDP/ICE envelope format (JSON text frame):
+Response:
 
 ```json
-{"type":"offer","payload":{"type":"offer","sdp":"..."}}
-{"type":"answer","payload":{"type":"answer","sdp":"..."}}
-{"type":"ice","payload":{"candidate":"candidate:...","sdpMid":"0","sdpMLineIndex":0}}
+{
+  "room_id": "abc...",
+  "sender_token": "v2.<exp>.<max_viewers>.<hmac>",
+  "sender_secret": "<base64url 16 bytes>",
+  "viewer_url": "https://app.fernsicht.space/#room=abc...&role=viewer",
+  "signaling_url": "https://signal.fernsicht.space",
+  "expires_at": "2026-04-18T12:00:00Z",
+  "expires_in": 43200,
+  "max_viewers": 1,
+  "poll_interval_hint": 25
+}
 ```
 
-For multi-viewer targeting:
+### `GET /poll/{room_id}?secret=<b64>`
+
+Sender polls for pending viewer tickets. Requires the `sender_secret` from
+session creation.
+
+Response:
 
 ```json
-{"to":"<viewer_id>","type":"offer","payload":{"type":"offer","sdp":"..."}}
-{"type":"answer","payload":{"type":"answer","sdp":"..."},"from":"<viewer_id>"}
+{
+  "tickets": [
+    {"ticket_id": "abc...", "offer": {"type": "offer", "sdp": "…"}}
+  ]
+}
 ```
 
-## 3) DataChannel Messages (Pipe-delimited)
+### `POST /watch`
 
-Transport:
+Viewer submits an offer to join a room.
 
-- WebRTC DataChannel text frames (UTF-8)
-- Channel label: `fernsicht`
-- Ordered delivery
+Body:
 
-### Message Types
+```json
+{"room_id": "abc...", "offer": {"type": "offer", "sdp": "…"}}
+```
 
-1. Identity:
+Response: `{"ticket_id": "…", "status": "queued", "ttl": 25}`.
+Returns 429 with `Retry-After` header when room or server is at capacity.
 
-```text
+### Ticket exchange
+
+| Method | Path                          | Caller | Purpose                                     |
+|--------|-------------------------------|--------|---------------------------------------------|
+| POST   | `/ticket/{id}/answer`         | Sender | Submit SDP answer (requires `secret`)       |
+| GET    | `/ticket/{id}/answer`         | Viewer | Poll for SDP answer                         |
+| POST   | `/ticket/{id}/ice/sender`     | Sender | Submit ICE candidates (requires `secret`)   |
+| GET    | `/ticket/{id}/ice/sender`     | Viewer | Fetch sender's ICE candidates               |
+| POST   | `/ticket/{id}/ice/viewer`     | Viewer | Submit ICE candidates                       |
+| GET    | `/ticket/{id}/ice/viewer`     | Sender | Fetch viewer's ICE candidates               |
+
+ICE GET endpoints accept `?since=N` for incremental polling.
+
+## 3. Room IDs
+
+- Character set: `[A-Za-z0-9_-]`
+- Length: server-configurable (`ROOM_ID_MIN_LEN` … `ROOM_ID_MAX_LEN`)
+
+## 4. WebRTC Role Reversal
+
+In V2 the **viewer creates the offer** and the DataChannel, and the sender
+creates the answer. This allows the sender to remain connectionless — it only
+reaches out to the server on its poll schedule.
+
+DataChannel label: `fernsicht`. Ordered delivery.
+
+## 5. DataChannel Messages (Pipe-delimited UTF-8)
+
+### Identity
+
+```
 ID|<peer_id>
 ```
 
-2. Task start:
+Emitted by the sender once the DataChannel opens.
 
-```text
+### Task start
+
+```
 START|<task_id>|<label>
 ```
 
-3. Progress fraction:
+### Progress
 
-```text
-P|<task_id>|<value>
+```
+P|<task_id>|<value>|<elapsed>|<eta>|<n>|<total>|<rate>|<unit>
 ```
 
-Constraints:
+| Field     | Format                        | Notes                                     |
+|-----------|-------------------------------|-------------------------------------------|
+| `value`   | Float `0.0000` – `1.0000`     | 4-decimal fraction                        |
+| `elapsed` | Float seconds (1 decimal) or `-` | Time since task start                   |
+| `eta`     | Float seconds (1 decimal) or `-` | Estimated seconds remaining             |
+| `n`       | Integer or `-`                 | Items completed                          |
+| `total`   | Integer or `-`                 | Total items (if known)                   |
+| `rate`    | Float (2 decimals) or `-`      | Items per second                         |
+| `unit`    | String                         | `it`, `epochs`, `files`, etc.            |
 
-- `value` must be in `[0, 1]`
-- sender should format with 2 decimals (`0.00` to `1.00`)
+Fields after `value` are optional. Parsers must treat `-` as "unknown".
 
-4. Task end:
+### Task end
 
-```text
+```
 END|<task_id>
 ```
 
-5. Keepalive:
+### Keepalive
 
-```text
+```
 K
 ```
 
-6. Signaling helper (not rendered in UI):
+Sent periodically (every ~20 seconds) to keep the DataChannel warm.
 
-```text
-READY
+## 6. Sender Sequence
+
+```
+ID → START → P* → END
 ```
 
-## 4) Sender Sequence (recommended)
-
-```text
-ID -> START -> P* -> END
-```
-
-- send `K` periodically while idle
-- support repeated/duplicate signaling frames defensively
-- ignore malformed unknown data channel frames
+Senders should send `K` while idle. Viewers must tolerate duplicate or
+malformed frames defensively and ignore anything they don't recognise.

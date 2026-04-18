@@ -49,3 +49,19 @@ def serialize_end(task_id: str) -> str:
 
 def serialize_keepalive() -> str:
     return "K"
+
+
+def serialize_presence(viewers: list[str]) -> str:
+    """Sender→viewers broadcast of who is currently watching.
+
+    Names are sanitized to strip pipes (the wire format has no escape
+    mechanism) and truncated to 32 chars. Empty names are dropped.
+    """
+    safe = []
+    for v in viewers:
+        if not v:
+            continue
+        cleaned = v.replace("|", "").strip()[:32]
+        if cleaned:
+            safe.append(cleaned)
+    return "|".join(["V", *safe])

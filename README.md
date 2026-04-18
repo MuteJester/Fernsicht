@@ -120,4 +120,4 @@ Fernsicht is dual-licensed:
 - **Open source**: [AGPL-3.0](./LICENSE) — free for open-source projects, research, and personal use. Any project using Fernsicht must also be open-sourced under AGPL-3.0.
 - **Commercial**: companies and individuals who want to use Fernsicht in closed-source or proprietary products must purchase a commercial license.
 
-For commercial licensing inquiries, contact **thomaskon90@gmail.com**.
+For commercial licensing inquiries, contact **thomas.konstat@gmail.com**.

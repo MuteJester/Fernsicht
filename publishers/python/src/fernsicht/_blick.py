@@ -5,33 +5,35 @@ from __future__ import annotations
 import os
 import sys
 import time
-from typing import Generic, Iterable, Iterator, TypeVar
+from typing import Any, Generic, Iterable, Iterator, TypeVar
 
-from fernsicht._room import generate_room_id
-from fernsicht._session import SessionBootstrapError, create_session, derive_session_url
+from fernsicht._session import SessionBootstrapError, create_session
 from fernsicht._transport import Transport
-from fernsicht._url import build_url
 
 T = TypeVar("T")
 
-SIGNALING_URL_ENV = "FERNSICHT_SIGNALING_URL"
+SERVER_URL_ENV = "FERNSICHT_SERVER_URL"
+SIGNALING_URL_ENV = "FERNSICHT_SIGNALING_URL"  # legacy alias
 SESSION_URL_ENV = "FERNSICHT_SESSION_URL"
 SESSION_API_KEY_ENV = "FERNSICHT_SESSION_API_KEY"
-SENDER_TOKEN_ENV = "FERNSICHT_SENDER_TOKEN"
-ALLOW_LOCAL_FALLBACK_ENV = "FERNSICHT_ALLOW_LOCAL_FALLBACK"
-DEFAULT_SIGNALING_URL = "wss://signal.fernsicht.space/ws"
+DEFAULT_SERVER_URL = "https://signal.fernsicht.space"
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None or raw == "":
-        return default
-    value = raw.strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(f"{name} must be a boolean (true/false)")
+def _normalize_legacy_ws_url(url: str | None) -> str | None:
+    """Convert legacy wss:// signaling URLs to https:// server URLs."""
+    if not url:
+        return None
+    u = url.strip()
+    if not u:
+        return None
+    if u.startswith("wss://"):
+        u = "https://" + u[len("wss://"):]
+    elif u.startswith("ws://"):
+        u = "http://" + u[len("ws://"):]
+    # Strip trailing /ws if present
+    if u.endswith("/ws"):
+        u = u[:-3]
+    return u
 
 
 def _normalize_max_viewers(
@@ -75,11 +77,9 @@ class FernsichtBar(Generic[T]):
         total: int | None = None,
         unit: str = "it",
         disable: bool = False,
-        file: object = None,
-        base_url: str | None = None,
-        signaling_url: str | None = None,
+        file: Any = None,
+        server_url: str | None = None,
         session_url: str | None = None,
-        sender_token: str | None = None,
         max_viewers: int = 1,
         multi_viewer: int | None = None,
     ) -> None:
@@ -113,56 +113,36 @@ class FernsichtBar(Generic[T]):
             multi_viewer=multi_viewer,
         )
 
-        resolved_signaling_url = (
-            signaling_url or os.getenv(SIGNALING_URL_ENV) or DEFAULT_SIGNALING_URL
+        resolved_server_url = (
+            server_url
+            or os.getenv(SERVER_URL_ENV)
+            or _normalize_legacy_ws_url(os.getenv(SIGNALING_URL_ENV))
+            or DEFAULT_SERVER_URL
         )
-        resolved_sender_token = sender_token or os.getenv(SENDER_TOKEN_ENV)
         resolved_api_key = os.getenv(SESSION_API_KEY_ENV)
-        allow_local_fallback = _env_bool(ALLOW_LOCAL_FALLBACK_ENV, False)
 
-        self._room_id = ""
-        self._url = ""
+        chosen_session_url = (
+            session_url
+            or os.getenv(SESSION_URL_ENV)
+            or f"{resolved_server_url.rstrip('/')}/session"
+        )
 
-        if resolved_sender_token is None:
-            chosen_session_url = (
-                session_url
-                or os.getenv(SESSION_URL_ENV)
-                or derive_session_url(resolved_signaling_url)
+        try:
+            session = create_session(
+                session_url=chosen_session_url,
+                api_key=resolved_api_key,
+                max_viewers=resolved_max_viewers,
             )
-            try:
-                session = create_session(
-                    session_url=chosen_session_url,
-                    api_key=resolved_api_key,
-                    max_viewers=resolved_max_viewers,
-                )
-                self._room_id = session.room_id
-                resolved_sender_token = session.sender_token
-                self._url = session.viewer_url
-                if signaling_url is None:
-                    resolved_signaling_url = session.signaling_url
-            except SessionBootstrapError as exc:
-                if allow_local_fallback:
-                    print(
-                        (
-                            f"\n  Fernsicht session bootstrap failed ({exc}). "
-                            "Falling back to local room generation.\n"
-                        ),
-                        file=self._file,
-                        flush=True,
-                    )
-                else:
-                    raise RuntimeError(
-                        "Fernsicht session bootstrap failed. "
-                        "Set FERNSICHT_ALLOW_LOCAL_FALLBACK=true to permit local fallback."
-                    ) from exc
+        except SessionBootstrapError as exc:
+            raise RuntimeError(
+                f"Fernsicht session bootstrap failed: {exc}. "
+                "Check FERNSICHT_SERVER_URL and network connectivity."
+            ) from exc
 
-        if not self._room_id:
-            self._room_id = generate_room_id()
+        self._room_id = session.room_id
+        self._url = session.viewer_url
 
-        if base_url:
-            self._url = build_url(self._room_id, base_url=base_url)
-        elif not self._url:
-            self._url = build_url(self._room_id)
+        poll_interval = session.poll_interval_hint or 25
 
         # Start the background WebRTC sender.
         self._transport = Transport(
@@ -171,8 +151,9 @@ class FernsichtBar(Generic[T]):
             desc=self._desc,
             total=self._total,
             unit=self._unit,
-            signaling_url=resolved_signaling_url,
-            sender_token=resolved_sender_token,
+            base_url=session.signaling_url or resolved_server_url,
+            sender_secret=session.sender_secret,
+            poll_interval_sec=float(poll_interval),
         )
 
         # Print the tracking URL

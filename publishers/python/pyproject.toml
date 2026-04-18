@@ -7,14 +7,14 @@ name = "fernsicht"
 version = "0.1.0"
 description = "Remote progress bar tracking — wrap your loop, watch from anywhere"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.9"
 authors = [{ name = "Fernsicht Contributors" }]
 keywords = ["progress", "remote", "webrtc", "monitoring"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -35,8 +35,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/fernsicht/fernsicht"
-Repository = "https://github.com/fernsicht/fernsicht"
+Homepage = "https://app.fernsicht.space"
+Repository = "https://github.com/MuteJester/fernsicht"
+Issues = "https://github.com/MuteJester/fernsicht/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fernsicht"]
