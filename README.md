@@ -29,25 +29,42 @@ Fernsicht lets you wrap any long-running loop and share live progress with anyon
 
 ## Quick Start
 
-### 1. Install
+<details open>
+<summary><b>Python</b></summary>
 
+### 1. Install
 ```bash
 pip install fernsicht
 ```
 
 ### 2. Wrap your loop
-
 ```python
 import time
 from fernsicht import blick
 
 for _ in blick(range(100), desc="Training"):
     time.sleep(0.1)
-
-# Up to 4 concurrent viewers:
-for _ in blick(range(100), desc="Training", max_viewers=4):
-    time.sleep(0.1)
 ```
+</details>
+
+<details>
+<summary><b>R</b></summary>
+
+### 1. Install
+```r
+remotes::install_github("MuteJester/Fernsicht", subdir = "publishers/r")
+```
+
+### 2. Wrap your loop
+```r
+library(fernsicht)
+
+result <- blick(1:100, function(i) {
+  Sys.sleep(0.1)
+  i * 2
+}, label = "Training")
+```
+</details>
 
 A shareable viewer URL is printed to your terminal:
 
