@@ -227,11 +227,42 @@ function formatDemoTime(seconds: number): string {
 
 // --- Entry ---
 
+// --- Landing language picker -----------------------------------------------
+
+function initLangPicker(): void {
+  const tabs  = document.querySelectorAll<HTMLButtonElement>(".lang-tab[data-lang]");
+  const panes = document.querySelectorAll<HTMLElement>(".lang-pane[data-lang]");
+  const card  = document.querySelector<HTMLElement>(".lang-card");
+  if (tabs.length === 0) return;
+
+  const select = (lang: string) => {
+    tabs.forEach((t) => {
+      const active = t.dataset.lang === lang;
+      t.classList.toggle("is-active", active);
+      t.setAttribute("aria-selected", String(active));
+    });
+    panes.forEach((p) => {
+      const match = p.dataset.lang === lang;
+      if (match) p.removeAttribute("hidden");
+      else       p.setAttribute("hidden", "");
+    });
+    if (card) card.dataset.activeLang = lang;
+  };
+
+  tabs.forEach((t) => {
+    t.addEventListener("click", () => {
+      const lang = t.dataset.lang;
+      if (lang) select(lang);
+    });
+  });
+}
+
 function main(): void {
   const params = parseFragment();
   if (!params) {
     showLanding();
     startDemoAnimation();
+    initLangPicker();
     return;
   }
 

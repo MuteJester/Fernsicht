@@ -313,6 +313,163 @@ body {
   margin-left: 15px;
 }
 
+/* ── Language picker (step 01) ──────────────────────────────────────── */
+
+.lang-picker {
+  margin-bottom: 0.65rem;
+}
+
+.lang-tabs {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+  margin-bottom: 0.5rem;
+  font-family: var(--v-font-mono);
+  font-size: 11px;
+  letter-spacing: var(--v-lt-caps);
+  text-transform: uppercase;
+}
+
+.lang-tab {
+  background: none;
+  border: 0;
+  padding: 5px 0 6px;
+  color: var(--v-text-3);
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  position: relative;
+  transition: color 0.18s ease;
+}
+.lang-tab::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: -1px;
+  height: 1px;
+  background: transparent;
+  transition: background 0.18s ease;
+}
+.lang-tab:hover {
+  color: var(--v-text);
+}
+.lang-tab.is-active {
+  color: var(--v-accent);
+}
+.lang-tab.is-active::after {
+  background: var(--v-accent);
+}
+.lang-tab:focus-visible {
+  outline: 1px solid var(--v-accent-dim);
+  outline-offset: 3px;
+  border-radius: 1px;
+}
+
+.lang-tab-soon {
+  color: var(--v-text-4);
+  font-size: 10px;
+  letter-spacing: var(--v-lt-caps);
+  margin-left: auto;
+  padding-top: 6px;
+}
+
+/* Unified install + usage card ──────────────────────────── */
+
+.lang-card {
+  background: var(--v-surface-2);
+  border: 1px solid var(--v-border);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
+}
+
+.lang-pane {
+  display: block;
+}
+.lang-pane[hidden] {
+  display: none;
+}
+
+/* Head: label + install command, tighter / slightly darker so it reads
+ * as a header strip without visually dominating. */
+.lang-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: var(--v-surface);
+  font-family: var(--v-font-mono);
+  font-size: 12px;
+  min-width: 0;
+}
+.lang-pane-label {
+  flex-shrink: 0;
+  color: var(--v-text-4);
+  font-size: 10px;
+  letter-spacing: var(--v-lt-caps);
+  text-transform: uppercase;
+}
+.lang-pane-cmd {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--v-text);
+  font-family: inherit;
+  font-size: inherit;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.lang-pane-divider {
+  height: 1px;
+  background: var(--v-border);
+}
+
+.lang-pane-code {
+  margin: 0;
+  padding: 14px 16px 16px;
+  background: transparent;
+  font-family: var(--v-font-mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--v-text);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.lang-pane-code .lang-keyword { color: var(--v-accent); }
+.lang-pane-code .lang-string  { color: #b3e0be; }
+.lang-pane-code .lang-comment { color: var(--v-text-3); font-style: italic; }
+
+/* "Output" line — what the user sees printed after running the snippet.
+ * Visually distinct from a comment: neutral color, no italic, with an
+ * accent arrow + green URL so the shareable link is the clear payoff. */
+.lang-pane-code .lang-output        { color: var(--v-text-2); }
+.lang-pane-code .lang-output-prefix { color: var(--v-accent); margin-right: 0.35em; }
+.lang-pane-code .lang-url           {
+  color: var(--v-accent);
+  border-bottom: 1px dotted var(--v-accent-dim);
+  padding-bottom: 1px;
+}
+
+/* Keep the scrollbar from looking jarring on the dark surface. */
+.lang-pane-cmd::-webkit-scrollbar,
+.lang-pane-code::-webkit-scrollbar {
+  height: 6px;
+}
+.lang-pane-cmd::-webkit-scrollbar-thumb,
+.lang-pane-code::-webkit-scrollbar-thumb {
+  background: var(--v-border-2);
+  border-radius: 3px;
+}
+
 /* CTA */
 .cta-section {
   padding: 2rem 0 2.5rem;

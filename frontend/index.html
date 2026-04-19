@@ -88,7 +88,57 @@
               <div class="step-num">01</div>
               <div class="step-body">
                 <h3>Add one line</h3>
-                <code>pip install fernsicht</code>
+                <div class="lang-picker">
+                  <div class="lang-tabs" role="tablist" aria-label="Language">
+                    <button
+                      class="lang-tab is-active"
+                      role="tab"
+                      aria-selected="true"
+                      data-lang="python"
+                      type="button"
+                    >python</button>
+                    <button
+                      class="lang-tab"
+                      role="tab"
+                      aria-selected="false"
+                      data-lang="r"
+                      type="button"
+                    >r</button>
+                    <span class="lang-tab-soon" aria-hidden="true">julia · ruby · matlab · lua  · next</span>
+                  </div>
+
+                  <div class="lang-card" data-active-lang="python">
+                    <!-- Python pane -->
+                    <div class="lang-pane" data-lang="python">
+                      <div class="lang-pane-head">
+                        <span class="lang-pane-label">install</span>
+                        <code class="lang-pane-cmd">pip install fernsicht</code>
+                      </div>
+                      <div class="lang-pane-divider"></div>
+                      <pre class="lang-pane-code"><span class="lang-keyword">from</span> fernsicht <span class="lang-keyword">import</span> blick
+
+<span class="lang-comment"># URL printed once — share it; viewers watch live in any browser.</span>
+<span class="lang-keyword">for</span> item <span class="lang-keyword">in</span> blick(items):
+    process(item)
+
+<span class="lang-output"><span class="lang-output-prefix">→</span> <span class="lang-url">https://app.fernsicht.space#room=abc12345</span></span></pre>
+                    </div>
+                    <!-- R pane -->
+                    <div class="lang-pane" data-lang="r" hidden>
+                      <div class="lang-pane-head">
+                        <span class="lang-pane-label">install</span>
+                        <code class="lang-pane-cmd">remotes::install_github(<span class="lang-string">"MuteJester/Fernsicht"</span>, subdir = <span class="lang-string">"publishers/r"</span>)</code>
+                      </div>
+                      <div class="lang-pane-divider"></div>
+                      <pre class="lang-pane-code"><span class="lang-keyword">library</span>(fernsicht)
+
+<span class="lang-comment"># URL printed once — share it; viewers watch live in any browser.</span>
+results &lt;- blick(items, process)
+
+<span class="lang-output"><span class="lang-output-prefix">→</span> <span class="lang-url">https://app.fernsicht.space#room=abc12345</span></span></pre>
+                    </div>
+                  </div>
+                </div>
                 <p>Wrap any loop or long task with <code>blick()</code>.</p>
               </div>
             </div>
