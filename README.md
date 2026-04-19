@@ -27,8 +27,6 @@ Fernsicht lets you wrap any long-running loop and share live progress with anyon
 - **Transport**: WebRTC DataChannel (fully peer-to-peer after handshake)
 - **Server role**: lightweight HTTP handshake only — no WebSockets, no persistent connections
 
-The signaling server handles ~1M concurrent rooms on a single vCPU. After the WebRTC handshake completes (~2-5 seconds), all progress data flows directly between sender and viewer with zero server involvement.
-
 ## Quick Start
 
 ### 1. Install
