@@ -45,3 +45,21 @@ Thumbs.db
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# Private working notes (plans, audits, scratch)
+.private/
+
+# Go bridge — compiled binaries (rebuilt per release; SHA256SUMS in dist/
+# is what we track via R/bundled_sha256.R, not the binaries themselves)
+bridge/dist/
+bridge/cmd/fernsicht-bridge/fernsicht-bridge
+bridge/cmd/fernsicht-bridge/fernsicht-bridge.exe
+
+# R package build / check artifacts
+*.Rcheck/
+*.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+publishers/r/*.tar.gz
+publishers/r/inst/doc/

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from fernsicht._wire import (
@@ -182,6 +186,91 @@ def test_presence_trims_whitespace() -> None:
 
 
 # --- Cross-layer contract with the frontend parser ---------------------------
+
+
+# --- Cross-implementation wire corpus ----------------------------------------
+#
+# The Go bridge (bridge/internal/wire) and this SDK MUST produce
+# byte-identical wire frames for the same inputs. The shared corpus at
+# bridge/internal/wire/testdata/corpus.json is loaded by both
+# bridge/internal/wire/wire_test.go and this file. A change to either
+# serializer that breaks the corpus fails CI on both sides — that's the
+# whole point. If you add a vector, add it once; both implementations
+# pick it up.
+
+
+_CORPUS_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "bridge"
+    / "internal"
+    / "wire"
+    / "testdata"
+    / "corpus.json"
+)
+
+
+def _load_corpus() -> list[dict[str, Any]]:
+    if not _CORPUS_PATH.exists():
+        # Skip cleanly when the publisher is consumed standalone (e.g.
+        # someone vendored just publishers/python/ without the bridge
+        # alongside). The corpus is the contract; if it's missing, the
+        # Python SDK still works — it just can't enforce the bridge
+        # contract from here.
+        return []
+    return json.loads(_CORPUS_PATH.read_text())["vectors"]
+
+
+_CORPUS_VECTORS = _load_corpus()
+
+
+def _dispatch(vec: dict[str, Any]) -> str:
+    fn = vec["fn"]
+    args = vec["args"]
+    if fn == "identity":
+        return serialize_identity(args["peer_id"])
+    if fn == "start":
+        return serialize_start(args["task_id"], args["label"])
+    if fn == "end":
+        return serialize_end(args["task_id"])
+    if fn == "keepalive":
+        return serialize_keepalive()
+    if fn == "presence":
+        return serialize_presence(args["viewers"])
+    if fn == "progress":
+        return serialize_progress(
+            args["task_id"],
+            args["value"],
+            elapsed=args.get("elapsed"),
+            eta=args.get("eta"),
+            n=args.get("n"),
+            total=args.get("total"),
+            rate=args.get("rate"),
+            unit=args.get("unit", "it"),
+        )
+    raise ValueError(f"unknown corpus fn: {fn!r}")
+
+
+@pytest.mark.skipif(
+    not _CORPUS_VECTORS,
+    reason=f"wire corpus not found at {_CORPUS_PATH}; run from full Fernsicht checkout",
+)
+@pytest.mark.parametrize("vec", _CORPUS_VECTORS, ids=[v["name"] for v in _CORPUS_VECTORS])
+def test_corpus_vector(vec: dict[str, Any]) -> None:
+    """Each vector must serialize to its documented `expected` byte sequence."""
+    got = _dispatch(vec)
+    assert got == vec["expected"], (
+        f"vector {vec['name']!r}: expected {vec['expected']!r}, got {got!r}"
+    )
+
+
+def test_corpus_has_at_least_ten_vectors() -> None:
+    """Plan §14 Phase 1 requires 10+ vectors. Guard against shrinkage."""
+    assert len(_CORPUS_VECTORS) >= 10, (
+        f"corpus shrunk below 10 vectors (found {len(_CORPUS_VECTORS)})"
+    )
+
+
+# --- Direct contract test (kept for in-file completeness) --------------------
 
 
 def test_field_order_matches_frontend_parser() -> None:

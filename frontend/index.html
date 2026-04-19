@@ -151,7 +151,7 @@
 
         <main class="viewer-main">
           <div class="viewer-container">
-            <section class="card card--focus" id="observation-card">
+            <section class="card card--focus is-connecting" id="observation-card">
               <span class="corner corner--tl"></span>
               <span class="corner corner--tr"></span>
               <span class="corner corner--bl"></span>
@@ -169,6 +169,34 @@
                     <p class="subtitle" id="obs-subtitle">Connecting to sender…</p>
                   </div>
                 </header>
+
+                <ol class="connect-stepper" id="connect-stepper">
+                  <li class="connect-step is-pending" data-phase="contacting-server">
+                    <span class="connect-step-dot"></span>
+                    <div class="connect-step-text">
+                      <span class="connect-step-label">Reaching the rendezvous server</span>
+                    </div>
+                  </li>
+                  <li class="connect-step is-pending" data-phase="queued">
+                    <span class="connect-step-dot"></span>
+                    <div class="connect-step-text">
+                      <span class="connect-step-label">Awaiting sender check-in</span>
+                      <span class="connect-step-detail" id="connect-step-countdown"></span>
+                    </div>
+                  </li>
+                  <li class="connect-step is-pending" data-phase="negotiating">
+                    <span class="connect-step-dot"></span>
+                    <div class="connect-step-text">
+                      <span class="connect-step-label">Negotiating peer-to-peer link</span>
+                    </div>
+                  </li>
+                  <li class="connect-step is-pending" data-phase="connected">
+                    <span class="connect-step-dot"></span>
+                    <div class="connect-step-text">
+                      <span class="connect-step-label">Connected — waiting for first frame</span>
+                    </div>
+                  </li>
+                </ol>
 
                 <div class="percent" id="percent-wrap" data-progress-tier="low">
                   <span id="obs-percent">0</span><span class="percent-sign">%</span>

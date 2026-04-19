@@ -1,0 +1,39 @@
+Package: fernsicht
+Type: Package
+Title: Watch Your R Code's Progress From Anywhere
+Version: 0.0.0.9000
+Authors@R: person(
+    given = "Thomas",
+    family = "Konstantinovsky",
+    email = "thomaskon90@gmail.com",
+    role = c("aut", "cre", "cph")
+  )
+Description: Wrap your long-running loops with blick() and share a live
+    progress URL with anyone in the world. Progress flows peer-to-peer
+    via WebRTC DataChannels, so the data stays between you and your
+    viewers. The package wraps the fernsicht-bridge Go binary, which is
+    lazy-downloaded from GitHub releases on first use.
+License: AGPL-3 + file LICENSE
+URL: https://github.com/MuteJester/Fernsicht,
+    https://app.fernsicht.space/
+BugReports: https://github.com/MuteJester/Fernsicht/issues
+Encoding: UTF-8
+Language: en-US
+Depends:
+    R (>= 4.1.0)
+Imports:
+    processx (>= 3.8.0),
+    jsonlite (>= 1.8.0),
+    R6 (>= 2.5.0),
+    digest (>= 0.6.30)
+Suggests:
+    testthat (>= 3.2.0),
+    withr (>= 2.5.0),
+    httpuv (>= 1.6.0),
+    knitr,
+    rmarkdown,
+    clipr
+RoxygenNote: 7.3.1
+Roxygen: list(markdown = TRUE)
+Config/testthat/edition: 3
+VignetteBuilder: knitr

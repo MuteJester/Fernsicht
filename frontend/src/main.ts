@@ -7,6 +7,7 @@ import {
   createProgressBar,
   getLocalViewerName,
   setConnectionDetail,
+  setConnectionPhase,
   setConnectionStatus,
   setPeerId,
   setPresence,
@@ -47,12 +48,13 @@ function startViewer(serverUrl: string, roomId: string): void {
   showViewerView();
   setRoomId(roomId);
   setConnectionStatus("connecting");
-  setConnectionDetail("Creating offer and contacting server...", "info");
+  setConnectionDetail("Reaching the rendezvous server…", "info");
+  setConnectionPhase("contacting-server");
 
   const peer = new ViewerPeer(serverUrl, roomId, {
     onOpen: () => {
       setConnectionStatus("connected");
-      setConnectionDetail("Connected. Waiting for live updates...", "info");
+      setConnectionDetail("Connected. Waiting for live updates…", "info");
       // Identify ourselves so the sender includes us in its presence
       // broadcasts. Safe to call before any other frames — the sender
       // handles HELLO on message receipt, not in a specific order.
@@ -61,6 +63,29 @@ function startViewer(serverUrl: string, roomId: string): void {
     onSignalingError: (_code, message, fatal) => {
       setConnectionStatus("signaling-error");
       setConnectionDetail(message, fatal ? "error" : "warning");
+    },
+    onPhase: (phase) => {
+      setConnectionPhase(phase);
+      // Update the subtitle to mirror the stepper for screen readers
+      // and small viewports where the stepper might wrap awkwardly.
+      switch (phase) {
+        case "contacting-server":
+          setConnectionDetail("Reaching the rendezvous server…", "info");
+          break;
+        case "queued":
+          setConnectionDetail(
+            "Waiting for the sender to pick up your handshake…", "info");
+          break;
+        case "negotiating":
+          setConnectionDetail("Negotiating peer-to-peer connection…", "info");
+          break;
+        case "connected":
+          setConnectionDetail("Connected. Waiting for first frame…", "info");
+          break;
+        case "failed":
+          setConnectionDetail("Connection failed. Try refreshing.", "error");
+          break;
+      }
     },
     onMessage: (raw) => {
       try {
@@ -101,15 +126,12 @@ function startViewer(serverUrl: string, roomId: string): void {
       setConnectionDetail("Disconnected.", "warning");
     },
     onStateChange: (state) => {
-      if (state === "connecting") {
+      // Header chip + footer signal indicator. The card stepper +
+      // subtitle text are driven by onPhase above (more granular).
+      if (state === "connecting" || state === "queued") {
         setConnectionStatus("connecting");
-        setConnectionDetail("Creating offer and contacting server...", "info");
-      } else if (state === "queued") {
-        setConnectionStatus("connecting");
-        setConnectionDetail("Waiting for sender to pick up handshake...", "info");
       } else if (state === "connected") {
         setConnectionStatus("connected");
-        setConnectionDetail("Connected. Waiting for live updates...", "info");
       }
     },
   });

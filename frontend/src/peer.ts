@@ -3,11 +3,19 @@
 import { ViewerSignaling } from "./signaling";
 import { serializeKeepAlive } from "./protocol";
 
+export type ConnectionPhase =
+  | "contacting-server"   // POST /watch in flight
+  | "queued"              // server accepted ticket; waiting for sender to poll
+  | "negotiating"         // answer received; ICE exchange + DTLS handshake
+  | "connected"           // DataChannel open; ready for first frame
+  | "failed";             // signaling or peer connection gave up
+
 export interface PeerEvents {
   onOpen: () => void;
   onMessage: (data: string) => void;
   onClose: () => void;
   onStateChange: (state: string) => void;
+  onPhase: (phase: ConnectionPhase) => void;
   onSignalingError: (code: string, message: string, fatal: boolean) => void;
 }
 
@@ -44,9 +52,15 @@ export class ViewerPeer {
       onAnswer: (answer) => this.handleAnswer(answer),
       onError: (msg, fatal) => {
         events.onSignalingError("SIGNALING", msg, fatal);
-        if (fatal) events.onStateChange("signaling-error");
+        if (fatal) {
+          events.onStateChange("signaling-error");
+          events.onPhase("failed");
+        }
       },
-      onQueued: () => events.onStateChange("queued"),
+      onQueued: () => {
+        events.onStateChange("queued");
+        events.onPhase("queued");
+      },
     });
 
     this.setupPeerConnection();
@@ -54,6 +68,7 @@ export class ViewerPeer {
 
   async start(): Promise<void> {
     this.events.onStateChange("connecting");
+    this.events.onPhase("contacting-server");
 
     // Viewer creates the DataChannel and the offer
     this.dc = this.pc.createDataChannel(DATACHANNEL_LABEL, { ordered: true });
@@ -65,6 +80,7 @@ export class ViewerPeer {
     const success = await this.signaling.watch(this.roomId, this.pc.localDescription!);
     if (!success) {
       this.events.onStateChange("signaling-error");
+      this.events.onPhase("failed");
     }
   }
 
@@ -105,6 +121,7 @@ export class ViewerPeer {
     dc.onopen = () => {
       this.events.onOpen();
       this.events.onStateChange("connected");
+      this.events.onPhase("connected");
       this.startKeepAlive();
       this.stopICEPoll(); // handshake done
     };
@@ -119,6 +136,7 @@ export class ViewerPeer {
   }
 
   private async handleAnswer(answer: RTCSessionDescriptionInit): Promise<void> {
+    this.events.onPhase("negotiating");
     try {
       await this.pc.setRemoteDescription(new RTCSessionDescription(answer));
       // Start polling for sender's ICE candidates

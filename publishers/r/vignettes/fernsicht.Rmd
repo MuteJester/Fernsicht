@@ -1,0 +1,186 @@
+---
+title: "Watching R progress with fernsicht"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Watching R progress with fernsicht}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE       # All chunks are non-evaluating: they touch the
+                     # network and spawn the bridge subprocess.
+)
+```
+
+`fernsicht` lets you watch any long-running R loop from a browser, on
+any device, without an account or installed app. Progress flows
+peer-to-peer over WebRTC, so the data stays between you and your
+viewers — the central server only mediates the handshake.
+
+This vignette walks through the three API layers and when to reach
+for each.
+
+## Install
+
+```{r}
+remotes::install_github("MuteJester/Fernsicht", subdir = "publishers/r")
+```
+
+The R package is small (~1,200 lines of R, no compiled code). On
+first use it downloads a ~10 MB Go binary (`fernsicht-bridge`) from
+GitHub releases, caches it under `tools::R_user_dir("fernsicht",
+"cache")`, and verifies its SHA256 against a table bundled in the
+package.
+
+## Layer 1 — `blick()`
+
+The headline. A drop-in replacement for `lapply()` that streams
+progress while it runs.
+
+```{r}
+library(fernsicht)
+
+results <- blick(1:100, function(i) {
+  Sys.sleep(0.05)
+  i * 2
+})
+#> Connecting to https://signal.fernsicht.space ...
+#> Connected. Viewer: https://app.fernsicht.space/#room=abc12345
+```
+
+Open the printed URL on your phone, send it to a colleague, project
+it on a wall — they'll see the bar fill in live as your loop runs.
+
+`blick()` preserves names if `items` has them (matching `lapply()`):
+
+```{r}
+named <- c(a = 1, b = 2, c = 3)
+out <- blick(named, function(x) x + 100)
+#>   a   b   c
+#> 101 102 103
+```
+
+A second `blick()` in the same R session **reuses the same viewer
+URL** — no new message, no new link to share. The session lives for
+the rest of the R process unless you `close_session()` it.
+
+## Layer 2 — `with_session()` for manual loops
+
+Sometimes a `for` loop is the right shape. `with_session()` scopes a
+task around an expression so bare `tick()` calls inside know which
+task to update.
+
+```{r}
+with_session({
+  for (i in seq_len(100)) {
+    do_one_step(i)
+    tick(value = i / 100, n = i, total = 100)
+  }
+}, label = "Bootstrap iteration")
+```
+
+Nested `with_session()` works — the inner scope replaces the outer
+on the wire, and on exit the outer task resumes so subsequent ticks
+land on it again.
+
+## Layer 3 — manual lifecycle
+
+For multi-phase work (e.g., training epochs containing batches):
+
+```{r}
+sess <- session(label = "Training")
+
+for (epoch in 1:10) {
+  start_task(sess, "epoch", paste("Epoch", epoch))
+  for (batch in 1:100) {
+    train_batch()
+    tick(sess, "epoch",
+         value = batch / 100, n = batch, total = 100)
+  }
+  end_task(sess, "epoch")
+}
+
+close_session(sess)   # optional — exits anyway when R exits
+```
+
+`session()` returns the per-process **ambient session**. Calling it a
+second time returns the same one — no new bridge subprocess, no new
+viewer URL.
+
+## Accessors
+
+```{r}
+viewer_url()                # ambient session's URL
+viewer_url(copy = TRUE)     # also copy to clipboard (needs `clipr`)
+viewers()                   # current roster, e.g. c("vega", "orion")
+diagnostics()               # snapshot suitable for logs / bug reports
+```
+
+`diagnostics()` is safe to log: the bridge's sender secret is
+**never** included in any public accessor or printable form.
+
+## Non-interactive environments
+
+In `Rscript`, `R CMD BATCH`, or RStudio's Job pane, `message()`
+output may not be visible. Use the accessor:
+
+```{r}
+sess <- session()
+cat("share this URL:", viewer_url(sess), "\n")
+```
+
+Or set the env var `FERNSICHT_VIEWER_URL_SINK` (planned in v1.x) to
+write the URL to a file on session creation.
+
+## Configuration
+
+Resolution order: function argument > R option > environment variable > default.
+
+| Setting | Argument | Option | Env var | Default |
+|---|---|---|---|---|
+| Server URL | `server_url=` | `fernsicht.server_url` | `FERNSICHT_SERVER_URL` | `https://signal.fernsicht.space` |
+| Join secret | `join_secret=` | `fernsicht.join_secret` | `FERNSICHT_JOIN_SECRET` | (none) |
+| Max viewers | `max_viewers=` | `fernsicht.max_viewers` | `FERNSICHT_MAX_VIEWERS` | `8` |
+| Bridge binary | `bridge_path=` | `fernsicht.bridge_path` | `FERNSICHT_BRIDGE_PATH` | (cache) |
+
+`FERNSICHT_BRIDGE_PATH` is the development override — useful when
+hacking on the bridge itself.
+
+## Errors
+
+Conditions are typed for `tryCatch()`:
+
+```{r}
+tryCatch(
+  blick(1:10, my_fn),
+  fernsicht_session_error    = function(e) message("session failed: ", e$message),
+  fernsicht_session_expired  = function(e) message("session expired (12h limit)"),
+  fernsicht_signaling_error  = function(e) message("can't reach signal server"),
+  fernsicht_internal_error   = function(e) message("bridge crashed")
+)
+```
+
+Sessions cap at 12 hours. The SDK warns once at ~80% elapsed so
+week-long runs can plan a restart.
+
+## Limits
+
+- **One session per R process.** Open multiple R processes for
+  multiple sessions. `furrr` / `future` parallel support is on the
+  roadmap.
+- **12-hour session lifetime.** Restart manually for longer jobs;
+  token refresh is planned but requires bridge work.
+- **No telemetry.** The package only contacts the configured
+  signaling server and GitHub releases.
+
+## Going further
+
+- [`?blick`](../html/blick.html), [`?with_session`](../html/with_session.html),
+  [`?session`](../html/session.html) for full reference docs.
+- The bridge protocol spec
+  ([BRIDGE_PROTOCOL.md](https://github.com/MuteJester/Fernsicht/blob/main/BRIDGE_PROTOCOL.md))
+  documents the wire format if you want to write an SDK for another language.

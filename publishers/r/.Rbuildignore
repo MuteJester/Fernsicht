@@ -1,0 +1,15 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.github$
+^\.gitignore$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+^cran-comments\.md$
+^CRAN-RELEASE$
+^README\.Rmd$
+^\.travis\.yml$
+^\.codecov\.yml$
+^revdep$
+^tools/update_sha256\.R$
+^LICENSE\.md$

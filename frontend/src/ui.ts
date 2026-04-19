@@ -14,6 +14,9 @@ const el = {
   peerValue:     () => $("peer-value"),
   signalText:    () => $("signal-text"),
   signalDot:     () => $("signal-dot"),
+  obsCard:        () => $("observation-card"),
+  stepper:        () => $("connect-stepper"),
+  stepCountdown:  () => $("connect-step-countdown"),
   title:         () => $("obs-title"),
   subtitle:      () => $("obs-subtitle"),
   percent:       () => $("obs-percent"),
@@ -119,6 +122,98 @@ export function setConnectionDetail(
   el.subtitle().textContent = message ?? "";
 }
 
+// --- Connection-phase stepper --------------------------------------------
+//
+// Visible only while the viewer is mid-handshake. The stepper sits in
+// place of the percent / horizon / stats block; once the first START
+// frame arrives, createProgressBar() reveals the real progress UI.
+
+export type ConnectionPhase =
+  | "contacting-server"
+  | "queued"
+  | "negotiating"
+  | "connected"
+  | "failed";
+
+const STEP_ORDER: ConnectionPhase[] = [
+  "contacting-server",
+  "queued",
+  "negotiating",
+  "connected",
+];
+
+// Worst-case sender poll interval. The bridge defaults to 25s; SDKs
+// may set their own. Surface this as a fixed cycle so the user sees
+// motion instead of a static "any second now" message.
+const SENDER_POLL_HINT_SEC = 25;
+
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
+let countdownRemaining = SENDER_POLL_HINT_SEC;
+
+export function setConnectionPhase(phase: ConnectionPhase): void {
+  // Clear any active countdown — it only runs during the queued phase.
+  stopCountdown();
+
+  const stepper = el.stepper();
+  if (phase === "failed") {
+    // Mark whichever step was current as failed, leave others as-is.
+    for (const step of stepper.children) {
+      if (step.classList.contains("is-active")) {
+        step.classList.remove("is-active");
+        step.classList.add("is-failed");
+      }
+    }
+    return;
+  }
+
+  const idx = STEP_ORDER.indexOf(phase);
+  if (idx < 0) return;
+
+  for (let i = 0; i < STEP_ORDER.length; i++) {
+    const step = stepper.children[i] as HTMLElement | undefined;
+    if (!step) continue;
+    step.classList.remove("is-pending", "is-active", "is-done", "is-failed");
+    if (i < idx)        step.classList.add("is-done");
+    else if (i === idx) step.classList.add("is-active");
+    else                step.classList.add("is-pending");
+  }
+
+  if (phase === "queued") startQueuedCountdown();
+  else                    el.stepCountdown().textContent = "";
+}
+
+function startQueuedCountdown(): void {
+  countdownRemaining = SENDER_POLL_HINT_SEC;
+  renderCountdown();
+  countdownTimer = setInterval(() => {
+    countdownRemaining -= 1;
+    if (countdownRemaining <= 0) countdownRemaining = SENDER_POLL_HINT_SEC;
+    renderCountdown();
+  }, 1000);
+}
+
+function renderCountdown(): void {
+  el.stepCountdown().textContent =
+    `Sender polls every ~${SENDER_POLL_HINT_SEC}s · next check-in in ${countdownRemaining}s`;
+}
+
+function stopCountdown(): void {
+  if (countdownTimer !== null) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+  el.stepCountdown().textContent = "";
+}
+
+/** Hide the connecting stepper and reveal the progress UI.
+ *  Called from createProgressBar(), but also exposed in case the
+ *  caller wants to reveal early (e.g., on dc.onopen for a non-task
+ *  smoke). */
+export function revealProgressUI(): void {
+  el.obsCard().classList.remove("is-connecting");
+  stopCountdown();
+}
+
 // --- Observation (single active task) -------------------------------------
 
 export function createProgressBar(taskId: string, label: string): void {
@@ -127,6 +222,9 @@ export function createProgressBar(taskId: string, label: string): void {
     completedResetTimer = null;
   }
   hideCompletionNote();
+  // First task frame — the handshake stepper has done its job; flip
+  // the card over to the live progress view.
+  revealProgressUI();
 
   activeTaskId = taskId;
   obs = { startedAt: Date.now() };

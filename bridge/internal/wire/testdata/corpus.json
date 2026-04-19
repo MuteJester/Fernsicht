@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "description": "Cross-implementation wire-frame test vectors. Both the Go bridge (bridge/internal/wire/wire_test.go) and the Python SDK (publishers/python/tests/test_wire.py) load this file and assert their serializers produce the documented `expected` string for the given `args`. A change to this file MUST keep both implementations passing — the corpus IS the contract.",
+  "vectors": [
+    {
+      "name": "identity_simple",
+      "fn": "identity",
+      "args": { "peer_id": "py-abc12345" },
+      "expected": "ID|py-abc12345"
+    },
+    {
+      "name": "identity_with_dashes_and_digits",
+      "fn": "identity",
+      "args": { "peer_id": "bridge-9f14b2c0" },
+      "expected": "ID|bridge-9f14b2c0"
+    },
+    {
+      "name": "start_simple",
+      "fn": "start",
+      "args": { "task_id": "t1", "label": "Training" },
+      "expected": "START|t1|Training"
+    },
+    {
+      "name": "start_label_with_spaces",
+      "fn": "start",
+      "args": { "task_id": "epoch-3", "label": "Epoch 3 of 10" },
+      "expected": "START|epoch-3|Epoch 3 of 10"
+    },
+    {
+      "name": "end_simple",
+      "fn": "end",
+      "args": { "task_id": "t1" },
+      "expected": "END|t1"
+    },
+    {
+      "name": "keepalive",
+      "fn": "keepalive",
+      "args": {},
+      "expected": "K"
+    },
+
+    {
+      "name": "progress_all_stats",
+      "fn": "progress",
+      "args": {
+        "task_id": "t1",
+        "value": 0.4523,
+        "elapsed": 12.3,
+        "eta": 15.0,
+        "n": 452,
+        "total": 1000,
+        "rate": 36.7,
+        "unit": "it"
+      },
+      "expected": "P|t1|0.4523|12.3|15.0|452|1000|36.70|it"
+    },
+    {
+      "name": "progress_no_optional_fields",
+      "fn": "progress",
+      "args": { "task_id": "t1", "value": 0.5 },
+      "expected": "P|t1|0.5000|-|-|-|-|-|it"
+    },
+    {
+      "name": "progress_zero_value",
+      "fn": "progress",
+      "args": { "task_id": "t1", "value": 0.0 },
+      "expected": "P|t1|0.0000|-|-|-|-|-|it"
+    },
+    {
+      "name": "progress_clamps_value_above_one",
+      "fn": "progress",
+      "args": { "task_id": "t1", "value": 1.5 },
+      "expected": "P|t1|1.0000|-|-|-|-|-|it"
+    },
+    {
+      "name": "progress_clamps_negative_value",
+      "fn": "progress",
+      "args": { "task_id": "t1", "value": -0.1 },
+      "expected": "P|t1|0.0000|-|-|-|-|-|it"
+    },
+    {
+      "name": "progress_one_third_rounds_to_4dp",
+      "fn": "progress",
+      "args": { "task_id": "t1", "value": 0.3333333333333333 },
+      "expected": "P|t1|0.3333|-|-|-|-|-|it"
+    },
+    {
+      "name": "progress_partial_stats",
+      "fn": "progress",
+      "args": {
+        "task_id": "t1",
+        "value": 0.5,
+        "elapsed": 10.0,
+        "n": 50,
+        "total": 100
+      },
+      "expected": "P|t1|0.5000|10.0|-|50|100|-|it"
+    },
+    {
+      "name": "progress_custom_unit",
+      "fn": "progress",
+      "args": { "task_id": "t1", "value": 0.5, "unit": "epochs" },
+      "expected": "P|t1|0.5000|-|-|-|-|-|epochs"
+    },
+    {
+      "name": "progress_rate_two_decimals",
+      "fn": "progress",
+      "args": { "task_id": "t1", "value": 0.5, "rate": 36.789 },
+      "expected": "P|t1|0.5000|-|-|-|-|36.79|it"
+    },
+    {
+      "name": "progress_elapsed_eta_one_decimal",
+      "fn": "progress",
+      "args": {
+        "task_id": "t1",
+        "value": 0.5,
+        "elapsed": 1.2345,
+        "eta": 9.8765
+      },
+      "expected": "P|t1|0.5000|1.2|9.9|-|-|-|it"
+    },
+
+    {
+      "name": "presence_empty",
+      "fn": "presence",
+      "args": { "viewers": [] },
+      "expected": "V"
+    },
+    {
+      "name": "presence_single",
+      "fn": "presence",
+      "args": { "viewers": ["orion"] },
+      "expected": "V|orion"
+    },
+    {
+      "name": "presence_multiple",
+      "fn": "presence",
+      "args": { "viewers": ["vega", "orion", "lyra"] },
+      "expected": "V|vega|orion|lyra"
+    },
+    {
+      "name": "presence_strips_pipes_in_names",
+      "fn": "presence",
+      "args": { "viewers": ["or|ion", "v|ega"] },
+      "expected": "V|orion|vega"
+    },
+    {
+      "name": "presence_drops_empty_and_whitespace_only_names",
+      "fn": "presence",
+      "args": { "viewers": ["", "orion", "   ", "vega"] },
+      "expected": "V|orion|vega"
+    },
+    {
+      "name": "presence_trims_whitespace",
+      "fn": "presence",
+      "args": { "viewers": ["  orion  "] },
+      "expected": "V|orion"
+    },
+    {
+      "name": "presence_truncates_long_names_to_32_chars",
+      "fn": "presence",
+      "args": {
+        "viewers": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+      },
+      "expected": "V|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}
