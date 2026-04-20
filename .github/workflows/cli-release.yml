@@ -121,9 +121,11 @@ jobs:
           fi
           echo "Tag/manifest assertion passed."
 
-      # Phase 0.2 — pre-publish green-CI gate. Don't ship from a red
-      # tree. Runs the same test suite as our day-to-day CI but scoped
-      # to the tag commit.
+      # Phase 0.2 — pre-publish green-CI gate. Only test the code
+      # this workflow actually ships: the CLI binary and the bridge
+      # (linked in via bridge/pkg/embed). Python / R / frontend tests
+      # belong to their own release workflows — a Python regression
+      # shouldn't block a CLI release.
       - name: Bridge tests
         working-directory: bridge
         run: go test -race -timeout 120s ./...
@@ -131,18 +133,6 @@ jobs:
       - name: CLI tests
         working-directory: cli
         run: go test -race -timeout 120s ./...
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pin v5.6.0
-        with:
-          python-version: '3.12'
-
-      - name: Python SDK tests
-        working-directory: publishers/python
-        run: |
-          python -m pip install -e .
-          python -m pip install pytest
-          pytest -q tests/
 
       # Phase 0.5 — reproducible-build verification. Catches
       # accidentally-non-deterministic build inputs BEFORE we publish
@@ -302,15 +292,26 @@ jobs:
           upload-release-assets: false
 
       # Compute base64-encoded digests of the release binaries so the
-      # SLSA provenance job can attest to these exact bytes.
+      # SLSA provenance job can attest to these exact bytes. Enumerate
+      # explicitly — NEVER use `fernsicht-*` here. The sign step wrote
+      # `.sig` + `.cert` files into the same dir, and `fernsicht-*`
+      # would glob them into the attestation subjects (bloated +
+      # wrong; cosign sigs are not artifacts in their own right).
       - name: Compute digests for SLSA
         id: digest-hash
         run: |
           cd cli/dist
-          # One line per artifact; base64-encoded for transport to the
-          # reusable SLSA workflow's input.
-          digests="$(sha256sum fernsicht-* install.sh install.ps1 \
-                       fernsicht.rb fernsicht.json \
+          digests="$(sha256sum \
+                       fernsicht-darwin-amd64 \
+                       fernsicht-darwin-arm64 \
+                       fernsicht-linux-amd64 \
+                       fernsicht-linux-arm64 \
+                       fernsicht-windows-amd64.exe \
+                       SHA256SUMS \
+                       install.sh \
+                       install.ps1 \
+                       fernsicht.rb \
+                       fernsicht.json \
                        "sbom-cli-${{ needs.preflight.outputs.version }}.cdx.json" \
                        | base64 -w0)"
           echo "digests=$digests" >> "$GITHUB_OUTPUT"

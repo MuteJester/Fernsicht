@@ -192,6 +192,54 @@ What we do instead:
 Don't delete tags or release artifacts — that breaks anyone who has
 the old SHA256 cached and tries to verify.
 
+## R SDK bridge-binary coupling
+
+The R SDK doesn't bundle the bridge binary — it downloads it lazily
+from the `bridge/v<VER>` GitHub release on first use. For that to
+work, THREE things must stay in sync:
+
+1. **A `bridge/v<VER>` release exists** in this repo with
+   `fernsicht-bridge-<os>-<arch>` assets (produced by
+   `.github/workflows/bridge-release.yml`).
+2. **`publishers/r/R/bundled_sha256.R` → `BRIDGE_VERSION`** matches
+   the release tag's `<VER>`.
+3. **`publishers/r/R/bundled_sha256.R` → `BUNDLED_SHA256`** has the
+   real SHA256 for each platform's `fernsicht-bridge-*` binary. If
+   any entry is `"PHASE0_PLACEHOLDER"` the package aborts with an
+   explicit error on first bridge invocation — no silent failures.
+
+### Ship order for any release that touches R
+
+```
+1. git tag bridge/v<VER> && git push --tags
+   → bridge-release.yml cross-builds + signs + publishes
+
+2. After workflow green, locally:
+   curl -fsSL \
+     "https://github.com/MuteJester/Fernsicht/releases/download/bridge/v<VER>/SHA256SUMS" \
+     -o bridge/dist/SHA256SUMS
+   cd publishers/r
+   Rscript tools/update_sha256.R <VER>
+   # Regenerates R/bundled_sha256.R in place.
+   git add R/bundled_sha256.R
+   git commit -m "chore(r): bump BRIDGE_VERSION + SHAs to <VER>"
+   git push
+
+3. Optional (not wired yet; see RELEASE_PIPELINE_PLAN Phase 2):
+   git tag r/v<VER> && git push --tags
+   → r-release.yml (future) publishes R SDK on GitHub / CRAN.
+```
+
+**If you ship a CLI release without doing this:** existing R SDK
+users who try to `fernsicht::blick()` get a Phase-0-placeholder
+abort. They can work around by setting `FERNSICHT_BRIDGE_VERSION`
+env var to the last known-good `<VER>`, but that's a bad UX.
+
+**For `cli/v0.1.0-rc1` rehearsal:** no R SDK release is planned,
+but anyone who clones `main` at that commit has a broken R SDK.
+This is pre-existing state, not a regression introduced by the
+rehearsal. Fix during the first STABLE v0.1.0 ship.
+
 ## Partial-release failure recovery
 
 A release touches N independent channels: GH Release, GHCR, Docker

@@ -90,8 +90,14 @@ jobs:
         env:
           DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          tag="${GITHUB_REF##*/cli/}"           # "v0.1.0"
-          version="${tag#v}"                     # "0.1.0"
+          # Same pattern as cli-release.yml for consistency:
+          #   tag      — full git ref ("cli/v0.1.0"), rarely used here
+          #              since Docker tags are version-based, not git-tag-
+          #              based, but kept as an output for symmetry.
+          #   version  — stripped ("0.1.0"), the bit we actually push as
+          #              `:v<version>`.
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#cli/v}"
           source_date_epoch="$(git log -1 --format=%ct "$GITHUB_REF")"
           commit="$(git rev-parse --short HEAD)"
           build_date="$(date -u -d "@$source_date_epoch" +%Y-%m-%dT%H:%M:%SZ)"

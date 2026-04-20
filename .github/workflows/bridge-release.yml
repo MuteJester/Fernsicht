@@ -153,11 +153,20 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      # Explicit enumeration — avoid `fernsicht-bridge-*` glob, which
+      # would match `.sig` + `.cert` files cosign just wrote into the
+      # same directory.
       - name: Compute digests for SLSA
         id: digest-hash
         run: |
           cd bridge/dist
-          digests="$(sha256sum fernsicht-bridge-* \
+          digests="$(sha256sum \
+                       fernsicht-bridge-darwin-amd64 \
+                       fernsicht-bridge-darwin-arm64 \
+                       fernsicht-bridge-linux-amd64 \
+                       fernsicht-bridge-linux-arm64 \
+                       fernsicht-bridge-windows-amd64.exe \
+                       SHA256SUMS \
                        "sbom-bridge-${{ needs.preflight.outputs.version }}.cdx.json" \
                        | base64 -w0)"
           echo "digests=$digests" >> "$GITHUB_OUTPUT"

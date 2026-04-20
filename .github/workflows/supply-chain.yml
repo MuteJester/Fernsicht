@@ -64,7 +64,11 @@ jobs:
           cache-dependency-path: ${{ matrix.component }}/go.sum
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        # Pinned — @latest silently changes the binary we run on each
+        # scan. Dependabot's `gomod` ecosystem won't bump this because
+        # it's not a module require; update manually when a new
+        # version is released.
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
       - name: Run govulncheck
         working-directory: ${{ matrix.component }}
@@ -158,13 +162,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
 
-      - name: Run osv-scanner
-        uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@98b584ee2ed2da3935ccce10e06739d54cdcd20b  # pin v2.0.0
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # pin v5.5.0
         with:
-          scan-args: |-
-            --recursive
-            --skip-git
-            ./
+          go-version: '1.26.x'
+
+      - name: Install osv-scanner
+        # Pinned — installed as a Go binary rather than via
+        # google/osv-scanner-action to keep the scanner dependency
+        # graph flat + consistent with govulncheck. Update manually
+        # when a new osv-scanner version is released.
+        run: go install github.com/google/osv-scanner/cmd/osv-scanner@v1.9.2
+
+      - name: Run osv-scanner
+        # `--recursive`: walk the repo including nested manifests
+        # (cli/go.mod, bridge/go.mod, publishers/python/pyproject.toml,
+        # frontend/package-lock.json).
+        # `--skip-git`: don't try to resolve commit-pinned deps
+        # (we don't use any + it's a network-heavy step).
+        # Exit code 1 on any vulnerability found; CI fails.
+        run: osv-scanner --recursive --skip-git ./
 
   # ------------------------------------------------------------------
   # License compliance: Go + Python. Ensures no transitive dep sneaks
@@ -187,7 +204,10 @@ jobs:
           cache-dependency-path: ${{ matrix.component }}/go.sum
 
       - name: Install go-licenses
-        run: go install github.com/google/go-licenses@latest
+        # Pinned — same reasoning as govulncheck above. The Go tool's
+        # output is used as a compliance artifact, so determinism
+        # matters.
+        run: go install github.com/google/go-licenses@v1.6.0
 
       - name: Run license check
         working-directory: ${{ matrix.component }}
