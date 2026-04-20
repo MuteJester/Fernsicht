@@ -61,7 +61,7 @@ jobs:
       source_date_epoch: ${{ steps.vars.outputs.source_date_epoch }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # pin v6.0.2
         with:
           fetch-depth: 0
 
@@ -158,7 +158,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # pin v6.0.2
         with:
           # Need the commit's history to derive SOURCE_DATE_EPOCH from
           # the tag's commit timestamp.
