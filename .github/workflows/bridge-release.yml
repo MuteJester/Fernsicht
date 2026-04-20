@@ -274,6 +274,14 @@ jobs:
       base64-subjects: ${{ needs.release.outputs.digests }}
       upload-assets: true
       upload-tag-name: ${{ needs.preflight.outputs.tag }}
+      # Non-blocking — SLSA upload-assets has a recurring bug where
+      # its internal softprops step stumbles on some release states.
+      # The provenance IS still generated and signed by Sigstore
+      # (visible in Rekor transparency log); the failure is purely
+      # on the "upload to GH release" step. For v0.1.0, cosign sigs
+      # + SBOM attached to every primary asset give us equivalent
+      # supply-chain confidence. Revisit once SLSA v2.2+ stabilizes.
+      continue-on-error: true
       # See cli-release.yml for rationale; required even for public
       # repos due to a v2.0.0 private-detection quirk.
       private-repository: true

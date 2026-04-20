@@ -274,3 +274,7 @@ jobs:
       # See cli-release.yml for rationale; required even for public
       # repos due to a v2.0.0 private-detection quirk.
       private-repository: true
+      # Non-blocking for the same reason as cli-release.yml. Python
+      # release's primary artifact is PyPI (immutable); SLSA
+      # provenance is a GH-release-only attachment.
+      continue-on-error: true

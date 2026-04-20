@@ -98,9 +98,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip pip-audit
           # Resolve deps into a lock file so pip-audit sees the
-          # transitive graph, not just direct deps.
+          # transitive graph, not just direct deps. Filter out
+          # `fernsicht` itself — it's our own not-yet-on-PyPI package;
+          # pip-audit would fail with "Dependency not found on PyPI"
+          # trying to audit us against ourselves.
           python -m pip install -e .
-          pip freeze > .deps.txt
+          pip freeze | grep -v '^fernsicht==\|^-e ' > .deps.txt
+          cat .deps.txt
 
       - name: Run pip-audit
         working-directory: publishers/python
@@ -222,7 +226,16 @@ jobs:
           #   unknown    — license couldn't be classified — review
           # For a pre-v0.1.0 AGPL release, only forbidden + unknown
           # block CI. Revisit policy once we hit v1.0.
-          go-licenses check ./... --disallowed_types=forbidden,unknown
+          #
+          # `--ignore=github.com/MuteJester/fernsicht` — skip our own
+          # first-party packages. go-licenses looks for a LICENSE
+          # file per Go module in the dependency tree, but our
+          # internal/* packages inherit the LICENSE at the repo root
+          # and go-licenses can't walk up to find it. Ignoring our
+          # own namespace is the standard pattern.
+          go-licenses check ./... \
+            --disallowed_types=forbidden,unknown \
+            --ignore=github.com/MuteJester/fernsicht
 
       - name: Generate license manifest
         working-directory: ${{ matrix.component }}

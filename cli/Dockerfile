@@ -62,9 +62,19 @@ FROM alpine:3.20
 # downloads work out-of-the-box. tini for clean signal forwarding to
 # wrapped subprocesses (Ctrl-C in `docker run` reaches the wrapped
 # command's process group correctly).
-RUN apk add --no-cache ca-certificates tini
+#
+# Also create a non-root user — fernsicht never needs root privileges
+# for any of its operations (no raw sockets, no privileged mounts).
+# Running unprivileged by default mitigates the `docker run --rm
+# fernsicht ... -- <hostile-command>` escape-via-root class of attack
+# if the wrapped command is untrusted. Users who need root in the
+# wrapped process can pass `docker run --user 0` explicitly.
+RUN apk add --no-cache ca-certificates tini && \
+    adduser -D -H -u 10001 -s /sbin/nologin fernsicht
 
 COPY --from=builder /out/fernsicht /usr/local/bin/fernsicht
+
+USER fernsicht:fernsicht
 
 # tini handles PID 1 responsibilities (signal forwarding, zombie
 # reaping); fernsicht itself is the actual entrypoint.
