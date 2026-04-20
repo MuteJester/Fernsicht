@@ -56,7 +56,7 @@ RUN go build \
 
 # ---------- runtime ----------
 
-FROM alpine:3.20
+FROM alpine:3.23
 
 # ca-certificates so HTTPS to signal.fernsicht.space + GitHub release
 # downloads work out-of-the-box. tini for clean signal forwarding to
