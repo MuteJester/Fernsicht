@@ -1,67 +1,112 @@
-/** DOM rendering for Fernsicht viewer — single observation card. */
+/** DOM rendering for Fernsicht viewer — new viewer bench design. */
 
 const $ = (id: string) => document.getElementById(id)!;
 
-// --- DOM accessors (lazy; DOM always present, `hidden` class toggles) ---
+// --- DOM accessors --------------------------------------------------------
+
 const el = {
-  landing:        () => $("landing"),
-  viewer:         () => $("viewer-view"),
-  siteFooter:     () => document.getElementById("site-footer"),
-  completionNote: () => $("completion-note"),
-  status:         () => $("connection-status"),
-  statusLabel:   () => $("connection-label"),
-  roomLabel:     () => $("room-label"),
-  peerValue:     () => $("peer-value"),
-  signalText:    () => $("signal-text"),
-  signalDot:     () => $("signal-dot"),
-  obsCard:        () => $("observation-card"),
-  stepper:        () => $("connect-stepper"),
-  stepCountdown:  () => $("connect-step-countdown"),
-  title:         () => $("obs-title"),
-  subtitle:      () => $("obs-subtitle"),
-  percent:       () => $("obs-percent"),
-  percentWrap:   () => $("percent-wrap"),
-  fill:          () => $("obs-fill"),
-  dot:           () => $("obs-dot"),
-  startClock:    () => $("obs-start"),
-  etaClock:      () => $("obs-eta-clock"),
-  statEta:       () => $("stat-eta"),
-  statRate:      () => $("stat-rate"),
-  statRateUnit:  () => $("stat-rate-unit"),
-  statItems:     () => $("stat-items"),
-  statTotal:     () => $("stat-total"),
-  statElapsed:   () => $("stat-elapsed"),
-  copyBtn:       () => $("copy-link-btn") as HTMLButtonElement,
-  viewersCount:  () => $("viewers-count"),
-  viewersList:   () => $("viewers-list"),
+  // Top rail
+  statusChip:    () => $("statusChip"),
+  railRoom:      () => $("railRoom"),
+  // Left rail: session
+  sessRoom:      () => $("sessRoom"),
+  sessStarted:   () => $("sessStarted"),
+  sessTransport: () => $("sessTransport"),
+  latency:       () => $("latency"),
+  // Left rail: share
+  shareUrl:      () => $("shareUrl"),
+  shareCopy:     () => $("shareCopy") as HTMLButtonElement,
+  taskBannerClose: () => $("taskBannerClose") as HTMLButtonElement,
+  taskBannerIcon:  () => $("taskBannerIcon"),
+  // Left rail: handshake
+  handshake:     () => $("handshake"),
+  // Center: instrument strip
+  stripRoom:     () => $("stripRoom"),
+  transport:     () => $("transport"),
+  viewerCount:   () => $("viewerCount"),
+  // Center: task header
+  taskTitle:     () => $("taskTitle"),
+  taskSub:       () => $("taskSub"),
+  taskBadge:     () => $("taskBadge"),
+  // Center: progress readout
+  pct:           () => $("pct"),
+  fracLabel:     () => $("fracLabel"),
+  fracN:         () => $("fracN"),
+  fracT:         () => $("fracT"),
+  fracN3:        () => $("fracN3"),
+  fracT3:        () => $("fracT3"),
+  fill:          () => $("fill"),
+  dot:           () => $("dot"),
+  // Center: stats row
+  eta:           () => $("eta"),
+  rate:          () => $("rate"),
+  rateUnit:      () => $("rateUnit"),
+  elapsed:       () => $("elapsed"),
+  // Center: error/warning banner
+  taskBanner:    () => $("taskBanner"),
+  taskBannerText: () => $("taskBannerText"),
+  // Completion card
+  doneCard:       () => $("doneCard"),
+  doneCardClose:  () => $("doneCardClose") as HTMLButtonElement,
+  doneCardMaybe:  () => $("doneCardMaybe") as HTMLButtonElement,
+  doneCardElapsed: () => $("doneCardElapsed"),
+  doneCardTimerFill: () => $("doneCardTimerFill"),
+  // Right rail: viewers
+  viewers:       () => $("viewers"),
+  viewerCount2:  () => $("viewerCount2"),
+  // Right rail: metrics
+  mLatency:      () => $("mLatency"),
+  mLatencyV:     () => $("mLatencyV"),
+  mPath:         () => $("mPath"),
+  mPathV:        () => $("mPathV"),
+  mSignal:       () => $("mSignal"),
+  mSignalV:      () => $("mSignalV"),
+  mKeep:         () => $("mKeep"),
+  mKeepV:        () => $("mKeepV"),
+  // Right rail: log
+  log:           () => $("log"),
+  // Footer
+  barState:      () => $("barState"),
+  barTransport:  () => $("barTransport"),
+  latencyFoot:   () => $("latencyFoot"),
 };
 
 let activeTaskId: string | null = null;
 let viewerInited = false;
+let handshakeStartedAt = 0;
+let lastKeepaliveAt = 0;
 
-interface ObsState {
-  startedAt: number;
-}
-let obs: ObsState | null = null;
+// Client-side rate/eta derivation. The viewer receives progress frames
+// from the sender; some senders (e.g. CLI magic-prefix in N/TOTAL form)
+// don't fill the rate/eta fields, so derive them from a rolling window
+// of (n, timestamp) samples. If the sender DOES send rate/eta, we use
+// its values verbatim and skip derivation.
+interface RateSample { n: number; t: number; }
+const RATE_WINDOW_MS = 20_000;
+const RATE_MIN_SAMPLES = 2;
+let rateSamples: RateSample[] = [];
+let taskStartedAt = 0;
+let elapsedTickTimer: ReturnType<typeof setInterval> | null = null;
+let maxProgressSeen = 0; // highest progress value (0..1) observed for the current task
+
 let completedResetTimer: ReturnType<typeof setTimeout> | null = null;
-let completionNoteFadeTimer: ReturnType<typeof setTimeout> | null = null;
 const COMPLETION_HOLD_MS = 15000;
 
 // --- View switching -------------------------------------------------------
+//
+// app.html is viewer-only — there's no landing section to hide or show.
+// These functions remain in the public API so main.ts's shared branches
+// work unchanged. `showLanding` on this page means "no room fragment;
+// bounce to landing".
 
 export function showLanding(): void {
-  el.landing().classList.remove("hidden");
-  el.viewer().classList.add("hidden");
-  el.siteFooter()?.classList.remove("hidden");
+  window.location.replace("/");
 }
 
 export function showViewerView(): void {
-  el.landing().classList.add("hidden");
-  el.viewer().classList.remove("hidden");
-  // The viewer has its own support pill (header) and contextual ask on
-  // completion; the fixed Ko-fi bar is landing-only.
-  el.siteFooter()?.classList.add("hidden");
   initViewerOnce();
+  handshakeStartedAt = performance.now();
+  renderStarted(new Date());
 }
 
 // --- Connection status ----------------------------------------------------
@@ -69,64 +114,70 @@ export function showViewerView(): void {
 type Status = "connecting" | "connected" | "disconnected" | "signaling-error";
 
 export function setConnectionStatus(status: Status): void {
-  const s = el.status();
-  const label = el.statusLabel();
-  const sDot = el.signalDot();
-  const sText = el.signalText();
-  s.className = "status";
-
+  const chip = el.statusChip();
+  chip.classList.remove("live", "warn", "error");
   switch (status) {
     case "connecting":
-      s.classList.add("status--connecting");
-      label.textContent = "Connecting";
-      sDot.className = "signal-dot signal-dot--amber";
-      sText.textContent = "Connecting…";
+      chip.textContent = "Connecting";
+      chip.classList.add("warn");
+      el.barState().textContent = "CONNECTING";
       break;
     case "connected":
-      s.classList.add("status--live");
-      label.textContent = activeTaskId ? "Live" : "Standby";
-      sDot.className = "signal-dot";
-      sText.textContent = "Signal stable";
+      chip.textContent = activeTaskId ? "Live" : "Standby";
+      chip.classList.add("live");
+      el.barState().textContent = "READY";
       break;
     case "disconnected":
-      s.classList.add("status--disconnected");
-      label.textContent = "Offline";
-      sDot.className = "signal-dot signal-dot--red";
-      sText.textContent = "Disconnected";
+      chip.textContent = "Offline";
+      chip.classList.add("error");
+      el.barState().textContent = "OFFLINE";
+      // No banner here — main.ts decides (completion banner vs. a plain
+      // disconnect notice) based on whether the task actually finished.
       break;
     case "signaling-error":
-      s.classList.add("status--error");
-      label.textContent = "Error";
-      sDot.className = "signal-dot signal-dot--red";
-      sText.textContent = "Signaling error";
+      chip.textContent = "Error";
+      chip.classList.add("error");
+      el.barState().textContent = "ERROR";
       break;
   }
 }
 
 export function setRoomId(roomId: string): void {
-  const short = roomId.length > 12 ? roomId.slice(0, 8) : roomId;
-  el.roomLabel().textContent = short;
+  const short = roomId.length > 12 ? `${roomId.slice(0, 8)}…` : roomId;
+  el.railRoom().textContent = short;
+  el.sessRoom().textContent = short;
+  el.stripRoom().textContent = short;
+
+  // Share URL: the *current* page URL works (it carries the room fragment).
+  el.shareUrl().textContent = window.location.href;
 }
 
-export function setPeerId(id: string): void {
-  el.peerValue().textContent = id;
+// No-op — the new design shows "remote" as a literal Host value rather
+// than a peer identifier. Kept in the public API for main.ts compat.
+export function setPeerId(_id: string): void {
+  /* no-op */
 }
 
 export function setConnectionDetail(
   message: string | null,
-  _tone: "info" | "warning" | "error" = "info",
+  tone: "info" | "warning" | "error" = "info",
 ): void {
-  // Surface pre-handshake messages as the card subtitle. Once a task is
-  // active, preserve the task's own subtitle.
+  // Pre-handshake: the subtitle mirrors the active step. Once a task is
+  // live, preserve the task's own subtitle.
   if (activeTaskId) return;
-  el.subtitle().textContent = message ?? "";
+  el.taskSub().textContent = message ?? "";
+
+  // Only surface truly hard errors through the flat banner — transient
+  // connecting warnings are already visible in the subtitle and the
+  // handshake stepper. A banner for every reconnect attempt was noisy.
+  if (tone === "error") {
+    showBanner(message ?? "Connection error", "error");
+  } else {
+    hideBanner();
+  }
 }
 
-// --- Connection-phase stepper --------------------------------------------
-//
-// Visible only while the viewer is mid-handshake. The stepper sits in
-// place of the percent / horizon / stats block; once the first START
-// frame arrives, createProgressBar() reveals the real progress UI.
+// --- Handshake stepper ----------------------------------------------------
 
 export type ConnectionPhase =
   | "contacting-server"
@@ -142,44 +193,77 @@ const STEP_ORDER: ConnectionPhase[] = [
   "connected",
 ];
 
-// Worst-case sender poll interval. The bridge defaults to 25s; SDKs
-// may set their own. Surface this as a fixed cycle so the user sees
-// motion instead of a static "any second now" message.
 const SENDER_POLL_HINT_SEC = 25;
-
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let countdownRemaining = SENDER_POLL_HINT_SEC;
+const phaseTimestamps = new Map<ConnectionPhase, number>();
 
 export function setConnectionPhase(phase: ConnectionPhase): void {
-  // Clear any active countdown — it only runs during the queued phase.
   stopCountdown();
 
-  const stepper = el.stepper();
+  const steps = el.handshake().children;
+
   if (phase === "failed") {
-    // Mark whichever step was current as failed, leave others as-is.
-    for (const step of stepper.children) {
+    // Mark whichever step is active as failed, leave the rest.
+    for (const step of Array.from(steps)) {
       if (step.classList.contains("is-active")) {
         step.classList.remove("is-active");
         step.classList.add("is-failed");
+        const t = step.querySelector<HTMLElement>(".timing");
+        if (t) t.textContent = "failed";
       }
     }
+    logEvent("handshake failed");
     return;
+  }
+
+  // Record phase entry for timing annotations.
+  if (!phaseTimestamps.has(phase)) {
+    phaseTimestamps.set(phase, performance.now());
   }
 
   const idx = STEP_ORDER.indexOf(phase);
   if (idx < 0) return;
 
   for (let i = 0; i < STEP_ORDER.length; i++) {
-    const step = stepper.children[i] as HTMLElement | undefined;
+    const step = steps[i] as HTMLElement | undefined;
     if (!step) continue;
-    step.classList.remove("is-pending", "is-active", "is-done", "is-failed");
-    if (i < idx)        step.classList.add("is-done");
-    else if (i === idx) step.classList.add("is-active");
-    else                step.classList.add("is-pending");
+    step.classList.remove("is-active", "is-done", "is-failed");
+    const t = step.querySelector<HTMLElement>(".timing");
+    if (i < idx) {
+      step.classList.add("is-done");
+      if (t) t.textContent = formatPhaseTiming(STEP_ORDER[i]);
+    } else if (i === idx) {
+      step.classList.add("is-active");
+      if (t) t.textContent = phase === "queued" ? "" : formatPhaseTiming(phase);
+    } else {
+      if (t) t.textContent = "";
+    }
+  }
+
+  // If we've reached `connected`, show the 5th (streaming) step as
+  // pending until the first START frame lands.
+  const streamStep = steps[4] as HTMLElement | undefined;
+  if (streamStep) {
+    streamStep.classList.remove("is-active", "is-done");
+    const t = streamStep.querySelector<HTMLElement>(".timing");
+    if (phase === "connected") {
+      streamStep.classList.add("is-active");
+      if (t) t.textContent = "awaiting frame";
+    } else {
+      if (t) t.textContent = "";
+    }
   }
 
   if (phase === "queued") startQueuedCountdown();
-  else                    el.stepCountdown().textContent = "";
+}
+
+function formatPhaseTiming(phase: ConnectionPhase): string {
+  const t = phaseTimestamps.get(phase);
+  if (!t || !handshakeStartedAt) return "";
+  const ms = Math.max(0, Math.round(t - handshakeStartedAt));
+  if (ms < 1000) return `+ ${ms} ms`;
+  return `+ ${(ms / 1000).toFixed(1)} s`;
 }
 
 function startQueuedCountdown(): void {
@@ -193,8 +277,11 @@ function startQueuedCountdown(): void {
 }
 
 function renderCountdown(): void {
-  el.stepCountdown().textContent =
-    `Sender polls every ~${SENDER_POLL_HINT_SEC}s · next check-in in ${countdownRemaining}s`;
+  // Display the countdown in the queued step's timing slot.
+  const queuedStep = el.handshake().children[1] as HTMLElement | undefined;
+  if (!queuedStep) return;
+  const t = queuedStep.querySelector<HTMLElement>(".timing");
+  if (t) t.textContent = `next check-in ${countdownRemaining}s`;
 }
 
 function stopCountdown(): void {
@@ -202,16 +289,6 @@ function stopCountdown(): void {
     clearInterval(countdownTimer);
     countdownTimer = null;
   }
-  el.stepCountdown().textContent = "";
-}
-
-/** Hide the connecting stepper and reveal the progress UI.
- *  Called from createProgressBar(), but also exposed in case the
- *  caller wants to reveal early (e.g., on dc.onopen for a non-task
- *  smoke). */
-export function revealProgressUI(): void {
-  el.obsCard().classList.remove("is-connecting");
-  stopCountdown();
 }
 
 // --- Observation (single active task) -------------------------------------
@@ -221,31 +298,42 @@ export function createProgressBar(taskId: string, label: string): void {
     clearTimeout(completedResetTimer);
     completedResetTimer = null;
   }
-  hideCompletionNote();
-  // First task frame — the handshake stepper has done its job; flip
-  // the card over to the live progress view.
-  revealProgressUI();
+  hideBanner();
 
   activeTaskId = taskId;
-  obs = { startedAt: Date.now() };
+  taskStartedAt = Date.now();
+  rateSamples = [];
+  maxProgressSeen = 0;
+  startElapsedTick();
 
-  el.title().textContent = label;
-  el.subtitle().textContent = "Starting…";
-  el.percent().textContent = "0";
-  el.percentWrap().dataset.progressTier = "low";
+  el.taskTitle().textContent = label;
+  el.taskSub().textContent = "Starting…";
+  el.taskBadge().textContent = "Running";
+  el.pct().textContent = "0";
   el.fill().style.width = "0%";
   el.dot().style.left = "0%";
-  el.startClock().textContent = formatClock(obs.startedAt);
-  el.etaClock().textContent = "—";
-  el.statEta().textContent = "—";
-  el.statRate().textContent = "—";
-  el.statRateUnit().textContent = "items/s";
-  el.statItems().textContent = "—";
-  el.statTotal().textContent = "—";
-  el.statElapsed().textContent = "0:00";
+  el.fracN().textContent = "—";
+  el.fracT().textContent = "—";
+  el.fracN3().textContent = "—";
+  el.fracT3().textContent = "—";
+  el.eta().textContent = "—";
+  el.rate().textContent = "—";
+  el.rateUnit().textContent = "/s";
+  el.elapsed().textContent = "0:00";
 
-  const lbl = el.statusLabel();
-  if (lbl.textContent === "Standby") lbl.textContent = "Live";
+  // Mark the 5th (streaming) handshake step as done.
+  const streamStep = el.handshake().children[4] as HTMLElement | undefined;
+  if (streamStep) {
+    streamStep.classList.remove("is-active");
+    streamStep.classList.add("is-done");
+    const t = streamStep.querySelector<HTMLElement>(".timing");
+    if (t) t.textContent = "live";
+  }
+
+  const chip = el.statusChip();
+  if (chip.textContent === "Standby") chip.textContent = "Live";
+
+  logEvent(`task <b>${escapeHtml(label)}</b> started`);
 }
 
 export function updateProgressBar(
@@ -260,106 +348,247 @@ export function updateProgressBar(
     unit: string;
   },
 ): void {
-  // Single-observation model: adopt an unseen task if none is active,
-  // otherwise ignore background-task updates.
   if (!activeTaskId) createProgressBar(taskId, taskId);
   if (taskId !== activeTaskId) return;
 
   const pct = Math.max(0, Math.min(100, value * 100));
-  el.percent().textContent = String(Math.floor(pct));
+  el.pct().textContent = String(Math.floor(pct));
   el.fill().style.width = `${pct}%`;
   el.dot().style.left = `${pct}%`;
-  el.percentWrap().dataset.progressTier = tierFor(pct);
+  if (value > maxProgressSeen) maxProgressSeen = value;
 
   if (stats) {
     const unit = stats.unit || "items";
-    el.statRateUnit().textContent = `${unit}/s`;
+    el.fracLabel().textContent = unit;
+    el.rateUnit().textContent = `${unit}/s`;
 
-    if (stats.n !== null) el.statItems().textContent = fmtNum(stats.n);
-    if (stats.total !== null) el.statTotal().textContent = fmtNum(stats.total);
-    if (stats.rate !== null) {
-      const r = stats.rate;
-      el.statRate().textContent = r >= 10 ? r.toFixed(0) : r.toFixed(1);
+    if (stats.n !== null) {
+      const nFmt = fmtNum(stats.n);
+      el.fracN().textContent = nFmt;
+      el.fracN3().textContent = nFmt;
     }
-    if (stats.elapsed !== null) el.statElapsed().textContent = formatDuration(stats.elapsed);
-    if (stats.eta !== null) {
-      el.statEta().textContent = formatDuration(stats.eta);
-      el.etaClock().textContent = formatClock(Date.now() + stats.eta * 1000);
+    if (stats.total !== null) {
+      const tFmt = fmtNum(stats.total);
+      el.fracT().textContent = tFmt;
+      el.fracT3().textContent = tFmt;
+    }
+    // Record a sample for client-side rate derivation whenever we have
+    // an n (absolute counter); total isn't required to compute rate.
+    const now = Date.now();
+    if (stats.n !== null) {
+      rateSamples.push({ n: stats.n, t: now });
+      const cutoff = now - RATE_WINDOW_MS;
+      while (rateSamples.length > 1 && rateSamples[0].t < cutoff) {
+        rateSamples.shift();
+      }
+    }
+
+    // Prefer the sender's rate if present; otherwise derive from the
+    // sample window.
+    let rate: number | null = stats.rate;
+    if (rate === null && rateSamples.length >= RATE_MIN_SAMPLES) {
+      const first = rateSamples[0];
+      const last = rateSamples[rateSamples.length - 1];
+      const dn = last.n - first.n;
+      const dt = (last.t - first.t) / 1000;
+      if (dt > 0 && dn >= 0) rate = dn / dt;
+    }
+    if (rate !== null) {
+      el.rate().textContent = rate >= 10 ? rate.toFixed(0) : rate.toFixed(2);
+    }
+
+    // Elapsed: prefer sender's value; otherwise use the client-side
+    // clock (which keeps ticking between progress frames thanks to
+    // startElapsedTick).
+    if (stats.elapsed !== null) {
+      el.elapsed().textContent = formatDuration(stats.elapsed);
+    } else if (taskStartedAt > 0) {
+      el.elapsed().textContent = formatDuration((now - taskStartedAt) / 1000);
+    }
+
+    // ETA: prefer sender's; otherwise derive from remaining / rate.
+    let eta: number | null = stats.eta;
+    if (eta === null && rate !== null && rate > 0
+        && stats.n !== null && stats.total !== null && stats.total > stats.n) {
+      eta = (stats.total - stats.n) / rate;
+    }
+    if (eta !== null) {
+      el.eta().textContent = formatDuration(eta);
     }
 
     if (stats.total !== null && stats.n !== null) {
-      el.subtitle().textContent = `${fmtNum(stats.n)} / ${fmtNum(stats.total)} ${unit}`;
+      el.taskSub().textContent = `${fmtNum(stats.n)} / ${fmtNum(stats.total)} ${unit} · live`;
     } else {
-      el.subtitle().textContent = "Running";
+      el.taskSub().textContent = "Running";
     }
+  }
+}
+
+function startElapsedTick(): void {
+  stopElapsedTick();
+  elapsedTickTimer = setInterval(() => {
+    if (!activeTaskId || taskStartedAt === 0) return;
+    // Only advance the elapsed label between sender frames — don't
+    // stomp on a freshly-written sender value; this fires on a 1s
+    // cadence regardless, and sender frames at >=1Hz will win the race.
+    el.elapsed().textContent = formatDuration((Date.now() - taskStartedAt) / 1000);
+  }, 1000);
+}
+
+function stopElapsedTick(): void {
+  if (elapsedTickTimer !== null) {
+    clearInterval(elapsedTickTimer);
+    elapsedTickTimer = null;
   }
 }
 
 export function completeProgressBar(taskId: string): void {
   if (taskId !== activeTaskId) return;
 
-  el.percent().textContent = "100";
-  el.percentWrap().dataset.progressTier = "done";
+  el.pct().textContent = "100";
   el.fill().style.width = "100%";
   el.dot().style.left = "100%";
-  el.statEta().textContent = "done";
-  el.subtitle().textContent = "Completed";
+  el.eta().textContent = "done";
+  el.taskSub().textContent = "Completed";
+  el.taskBadge().textContent = "Done";
 
-  showCompletionNote();
+  logEvent(`task <b>completed</b>`);
+  showDoneCard();
+
+  stopElapsedTick();
 
   if (completedResetTimer) clearTimeout(completedResetTimer);
   completedResetTimer = setTimeout(() => {
     activeTaskId = null;
-    obs = null;
+    taskStartedAt = 0;
+    rateSamples = [];
+    // Don't dismiss the done-card on idle reset — its own auto-dismiss
+    // timer (20s) handles that and keeps the Ko-fi ask on screen briefly
+    // past the task state flip.
     resetToIdle();
   }, COMPLETION_HOLD_MS);
 }
 
+/** Safety net: the sender disconnected before an explicit END frame
+ *  arrived. If the task had meaningfully progressed, assume it finished
+ *  and show the done-card anyway. */
+export function maybeShowCompletionOnClose(): void {
+  if (maxProgressSeen >= 0.95) showDoneCard();
+}
+
 function resetToIdle(): void {
-  hideCompletionNote();
-  el.title().textContent = "Awaiting signal";
-  el.subtitle().textContent = "Ready for the next observation";
-  el.percent().textContent = "0";
-  el.percentWrap().dataset.progressTier = "low";
+  hideBanner();
+  el.taskTitle().textContent = "Awaiting signal";
+  el.taskSub().textContent = "Ready for the next observation";
+  el.taskBadge().textContent = "Idle";
+  el.pct().textContent = "0";
   el.fill().style.width = "0%";
   el.dot().style.left = "0%";
-  el.startClock().textContent = "—";
-  el.etaClock().textContent = "—";
-  el.statEta().textContent = "—";
-  el.statRate().textContent = "—";
-  el.statItems().textContent = "—";
-  el.statTotal().textContent = "—";
-  el.statElapsed().textContent = "—";
+  el.fracN().textContent = "—";
+  el.fracT().textContent = "—";
+  el.fracN3().textContent = "—";
+  el.fracT3().textContent = "—";
+  el.eta().textContent = "—";
+  el.rate().textContent = "—";
+  el.elapsed().textContent = "—";
 
-  const lbl = el.statusLabel();
-  if (lbl.textContent === "Live") lbl.textContent = "Standby";
+  const chip = el.statusChip();
+  if (chip.textContent === "Live") chip.textContent = "Standby";
 }
 
-// --- Completion note (contextual support ask) ----------------------------
+// --- Done card (task complete → Ko-fi ask) --------------------------------
+//
+// Soft-entrance card shown on task completion. Auto-dismisses after 20s
+// (CSS-driven timer bar). Hovering/focusing pauses the timer so the
+// viewer has time to read. Idempotent per task — showDoneCard is safe
+// to call multiple times; only the first invocation since the last
+// hideDoneCard triggers the entrance animation.
 
-function showCompletionNote(): void {
-  const note = el.completionNote();
-  if (completionNoteFadeTimer) {
-    clearTimeout(completionNoteFadeTimer);
-    completionNoteFadeTimer = null;
-  }
-  note.classList.remove("is-hiding");
-  note.removeAttribute("hidden");
-  // Start fading out slightly before the card's reset so the visual
-  // transitions don't collide.
-  completionNoteFadeTimer = setTimeout(() => {
-    note.classList.add("is-hiding");
-  }, COMPLETION_HOLD_MS - 500);
+const DONE_CARD_AUTO_DISMISS_MS = 20_000;
+const DONE_CARD_POST_HOVER_MS   =  6_000;
+let doneCardShown = false;
+let doneCardHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showDoneCard(): void {
+  if (doneCardShown) return;
+  doneCardShown = true;
+
+  const card = el.doneCard();
+  const timerFill = el.doneCardTimerFill();
+  const elapsedTxt = el.elapsed().textContent?.trim();
+  el.doneCardElapsed().textContent =
+    elapsedTxt && elapsedTxt !== "—" ? elapsedTxt : "finished";
+
+  card.removeAttribute("hidden");
+
+  // Restart the CSS timer animation by toggling the class.
+  timerFill.classList.remove("is-running");
+  // Force a reflow so the keyframes reset.
+  void timerFill.offsetWidth;
+  timerFill.classList.add("is-running");
+
+  if (doneCardHideTimer) clearTimeout(doneCardHideTimer);
+  doneCardHideTimer = setTimeout(hideDoneCard, DONE_CARD_AUTO_DISMISS_MS);
 }
 
-function hideCompletionNote(): void {
-  if (completionNoteFadeTimer) {
-    clearTimeout(completionNoteFadeTimer);
-    completionNoteFadeTimer = null;
-  }
-  const note = el.completionNote();
-  note.classList.remove("is-hiding");
-  note.setAttribute("hidden", "");
+function hideDoneCard(): void {
+  const card = el.doneCard();
+  if (card.hasAttribute("hidden")) { doneCardShown = false; return; }
+
+  card.classList.add("is-leaving");
+  if (doneCardHideTimer) { clearTimeout(doneCardHideTimer); doneCardHideTimer = null; }
+  setTimeout(() => {
+    card.setAttribute("hidden", "");
+    card.classList.remove("is-leaving");
+    el.doneCardTimerFill().classList.remove("is-running");
+    doneCardShown = false;
+  }, 420);
+}
+
+function initDoneCardHandlers(): void {
+  const card = el.doneCard();
+  const timerFill = el.doneCardTimerFill();
+
+  el.doneCardClose().addEventListener("click", hideDoneCard);
+  el.doneCardMaybe().addEventListener("click", hideDoneCard);
+
+  // Pause the auto-dismiss timer while the viewer is reading.
+  const pause = () => {
+    timerFill.classList.add("is-paused");
+    if (doneCardHideTimer) { clearTimeout(doneCardHideTimer); doneCardHideTimer = null; }
+  };
+  const resume = () => {
+    timerFill.classList.remove("is-paused");
+    if (doneCardHideTimer) clearTimeout(doneCardHideTimer);
+    doneCardHideTimer = setTimeout(hideDoneCard, DONE_CARD_POST_HOVER_MS);
+  };
+  card.addEventListener("mouseenter", pause);
+  card.addEventListener("focusin", pause);
+  card.addEventListener("mouseleave", resume);
+  card.addEventListener("focusout", resume);
+}
+
+// --- Flat banner (error / warning only; completion uses doneCard) --------
+
+function showBanner(
+  text: string,
+  tone: "warn" | "error",
+  icon?: string,
+): void {
+  const banner = el.taskBanner();
+  const textEl = el.taskBannerText();
+  const iconEl = el.taskBannerIcon();
+
+  banner.classList.remove("task-banner--warn", "task-banner--error");
+  banner.classList.add(`task-banner--${tone}`);
+  banner.removeAttribute("hidden");
+
+  textEl.textContent = text;
+  iconEl.textContent = icon ?? (tone === "warn" ? "!" : "×");
+}
+
+function hideBanner(): void {
+  el.taskBanner().setAttribute("hidden", "");
 }
 
 // --- Viewer chrome init ---------------------------------------------------
@@ -368,11 +597,14 @@ function initViewerOnce(): void {
   if (viewerInited) return;
   viewerInited = true;
 
-  el.copyBtn().addEventListener("click", async () => {
+  initRailToggles();
+  initDoneCardHandlers();
+
+  el.shareCopy().addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      const btn = el.copyBtn();
-      const orig = btn.textContent ?? "Copy viewer link";
+      const btn = el.shareCopy();
+      const orig = btn.textContent ?? "Copy";
       btn.textContent = "Copied";
       btn.classList.add("copied");
       setTimeout(() => {
@@ -383,26 +615,65 @@ function initViewerOnce(): void {
       console.warn("Copy failed:", err);
     }
   });
+
+  el.taskBannerClose().addEventListener("click", () => hideBanner());
+
+  // Keyboard shortcuts: F (fullscreen), C (copy link).
+  document.addEventListener("keydown", (ev) => {
+    const target = ev.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    const key = ev.key.toLowerCase();
+    if (key === "c") el.shareCopy().click();
+    if (key === "f") {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  });
 }
 
-/** Sender→viewers authoritative presence list. Replaces the viewers strip. */
+// Tap a rail-block's header (on mobile, per CSS) to toggle its body.
+// On desktop the clicks are a no-op because the CSS doesn't hide the
+// body — the class switch is harmless.
+function initRailToggles(): void {
+  const blocks = document.querySelectorAll<HTMLElement>(".rail-block[data-collapsible]");
+  for (const block of Array.from(blocks)) {
+    const head = block.querySelector<HTMLElement>(".rail-block-head");
+    if (!head) continue;
+    head.addEventListener("click", () => {
+      block.classList.toggle("is-open");
+    });
+  }
+}
+
+function renderStarted(when: Date): void {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  el.sessStarted().textContent =
+    `${pad(when.getUTCHours())}:${pad(when.getUTCMinutes())}:${pad(when.getUTCSeconds())} UTC`;
+}
+
+// --- Viewer presence ------------------------------------------------------
+
 export function setPresence(names: string[]): void {
-  const list = el.viewersList();
+  const list = el.viewers();
   list.innerHTML = "";
 
   const local = getLocalViewerName();
   for (const name of names) {
     const isMe = name === local;
-    const viewerEl = document.createElement("div");
-    viewerEl.className = isMe ? "viewer viewer--me" : "viewer";
-    viewerEl.title = isMe ? `${name} (you)` : name;
-    viewerEl.innerHTML = `
+    const row = document.createElement("div");
+    row.className = isMe ? "viewer-row me" : "viewer-row";
+    row.innerHTML = `
       <div class="viewer-avatar">${makeAvatar(name)}</div>
-      <div class="viewer-name">${escapeHtml(name)}</div>
+      <div class="viewer-name">${escapeHtml(name)}${isMe ? " <span class=\"dim\">(you)</span>" : ""}</div>
+      <div class="viewer-since">${isMe ? "just now" : ""}</div>
     `;
-    list.appendChild(viewerEl);
+    list.appendChild(row);
   }
-  el.viewersCount().textContent = String(names.length);
+  el.viewerCount().textContent = String(names.length);
+  el.viewerCount2().textContent = `${names.length} live`;
 }
 
 export function getLocalViewerName(): string {
@@ -418,6 +689,142 @@ export function getLocalViewerName(): string {
     sessionStorage.setItem(KEY, name);
   }
   return name;
+}
+
+// --- Event log ------------------------------------------------------------
+
+const logStartedAt = performance.now();
+const LOG_MAX = 40;
+
+export function logEvent(html: string): void {
+  const feed = el.log();
+  if (!feed) return;
+
+  const elapsed = (performance.now() - logStartedAt) / 1000;
+  const mm = Math.floor(elapsed / 60);
+  const ss = Math.floor(elapsed % 60);
+  const ts = `+${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+
+  const row = document.createElement("div");
+  row.className = "ln";
+  row.innerHTML = `<span class="ts">${ts}</span><span class="msg">${html}</span>`;
+  feed.appendChild(row);
+  while (feed.children.length > LOG_MAX) feed.removeChild(feed.firstChild!);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+// --- Stats polling --------------------------------------------------------
+//
+// Called once after the RTCPeerConnection is live. Uses getStats() to
+// read RTT + selected ICE pair; derives transport path (direct vs relay)
+// and signal quality. Keepalive liveness is derived from our own send
+// loop via `markKeepalive()`.
+
+const STATS_POLL_INTERVAL_MS = 2000;
+
+interface IceCandidateStats {
+  id: string;
+  candidateType?: string;      // host | srflx | prflx | relay
+  type: string;
+}
+
+interface CandidatePairStats {
+  selected?: boolean;
+  nominated?: boolean;
+  state?: string;
+  localCandidateId?: string;
+  remoteCandidateId?: string;
+  currentRoundTripTime?: number; // seconds
+  type: string;
+}
+
+let statsTimer: ReturnType<typeof setInterval> | null = null;
+
+export function initStatsPolling(pc: RTCPeerConnection): void {
+  stopStatsPolling();
+
+  const tick = async () => {
+    try {
+      const report = await pc.getStats();
+      const pairs: CandidatePairStats[] = [];
+      const cands = new Map<string, IceCandidateStats>();
+
+      report.forEach((s: any) => {
+        if (s.type === "candidate-pair") pairs.push(s as CandidatePairStats);
+        if (s.type === "local-candidate" || s.type === "remote-candidate") {
+          cands.set(s.id, s as IceCandidateStats);
+        }
+      });
+
+      // Prefer the selected/nominated succeeded pair.
+      const selected = pairs.find((p) => p.selected)
+        ?? pairs.find((p) => p.state === "succeeded" && p.nominated)
+        ?? pairs.find((p) => p.state === "succeeded");
+
+      if (selected) {
+        const rttSec = selected.currentRoundTripTime ?? 0;
+        const rttMs = Math.max(1, Math.round(rttSec * 1000));
+        el.latency().textContent = String(rttMs);
+        el.latencyFoot().textContent = String(rttMs);
+
+        // Latency bar: 0ms=100%, 400ms=0% (clamped).
+        const latPct = Math.max(4, Math.min(100, 100 - (rttMs / 400) * 100));
+        el.mLatency().style.width = `${latPct}%`;
+        el.mLatencyV().textContent = `${rttMs} ms`;
+
+        // Transport: inspect local candidate type.
+        const local = selected.localCandidateId ? cands.get(selected.localCandidateId) : undefined;
+        const remote = selected.remoteCandidateId ? cands.get(selected.remoteCandidateId) : undefined;
+        const localType = (local as any)?.candidateType as string | undefined;
+        const remoteType = (remote as any)?.candidateType as string | undefined;
+        const isRelay = localType === "relay" || remoteType === "relay";
+        const pathLabel = isRelay ? "relay" : "direct";
+
+        el.transport().textContent = `webrtc · ${pathLabel}`;
+        el.sessTransport().textContent = `webrtc / ${pathLabel}`;
+        el.barTransport().textContent = `stream · ${pathLabel}`;
+
+        el.mPath().style.width = isRelay ? "55%" : "100%";
+        el.mPathV().textContent = pathLabel;
+
+        // Signal quality from RTT: <120ms = stable, 120–300ms = fair, >300ms = jittery.
+        let signalPct = 100, signalLabel = "stable";
+        if (rttMs > 300)      { signalPct = 30; signalLabel = "jittery"; }
+        else if (rttMs > 120) { signalPct = 70; signalLabel = "fair"; }
+        el.mSignal().style.width = `${signalPct}%`;
+        el.mSignalV().textContent = signalLabel;
+      }
+
+      // Keepalive: if we've seen one in the last 30s, we're healthy.
+      const keepalive_age = lastKeepaliveAt === 0 ? null : (Date.now() - lastKeepaliveAt) / 1000;
+      if (keepalive_age === null) {
+        el.mKeep().style.width = "0%";
+        el.mKeepV().textContent = "waiting";
+      } else if (keepalive_age < 30) {
+        el.mKeep().style.width = "100%";
+        el.mKeepV().textContent = "ok";
+      } else {
+        el.mKeep().style.width = "30%";
+        el.mKeepV().textContent = "late";
+      }
+    } catch (err) {
+      console.warn("[stats] getStats failed:", err);
+    }
+  };
+
+  tick();
+  statsTimer = setInterval(tick, STATS_POLL_INTERVAL_MS);
+}
+
+export function stopStatsPolling(): void {
+  if (statsTimer !== null) {
+    clearInterval(statsTimer);
+    statsTimer = null;
+  }
+}
+
+export function markKeepalive(): void {
+  lastKeepaliveAt = Date.now();
 }
 
 // --- Procedural wave-pixel avatar -----------------------------------------
@@ -443,7 +850,7 @@ function mulberry32(seed: number): () => number {
 }
 
 function makeAvatar(name: string): string {
-  const size = 40;
+  const size = 32;
   const pixel = 2;
   const pad = 2;
   const gridN = Math.floor((size - pad * 2) / pixel);
@@ -492,21 +899,8 @@ function makeAvatar(name: string): string {
 
 // --- Utilities ------------------------------------------------------------
 
-function tierFor(pct: number): string {
-  if (pct >= 100) return "done";
-  if (pct >= 70) return "high";
-  if (pct >= 35) return "mid";
-  return "low";
-}
-
 function fmtNum(n: number): string {
   return n.toLocaleString("en-US").replace(/,/g, " ");
-}
-
-function formatClock(ts: number): string {
-  const d = new Date(ts);
-  const pad = (x: number) => String(x).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function formatDuration(seconds: number): string {

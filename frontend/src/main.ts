@@ -1,4 +1,4 @@
-/** Fernsicht frontend entry point — WebRTC P2P progress viewer. */
+/** Fernsicht app.html entry — viewer-only runtime. */
 
 import { ViewerPeer } from "./peer";
 import { parseMessage, serializeHello } from "./protocol";
@@ -6,6 +6,10 @@ import {
   completeProgressBar,
   createProgressBar,
   getLocalViewerName,
+  initStatsPolling,
+  logEvent,
+  markKeepalive,
+  maybeShowCompletionOnClose,
   setConnectionDetail,
   setConnectionPhase,
   setConnectionStatus,
@@ -42,32 +46,29 @@ function getServerUrl(): string {
   return url as string;
 }
 
-// --- Viewer ---
-
 function startViewer(serverUrl: string, roomId: string): void {
   showViewerView();
   setRoomId(roomId);
   setConnectionStatus("connecting");
   setConnectionDetail("Reaching the rendezvous server…", "info");
   setConnectionPhase("contacting-server");
+  logEvent(`session <b>opened</b> · room ${roomId.slice(0, 8)}`);
 
   const peer = new ViewerPeer(serverUrl, roomId, {
     onOpen: () => {
       setConnectionStatus("connected");
       setConnectionDetail("Connected. Waiting for live updates…", "info");
-      // Identify ourselves so the sender includes us in its presence
-      // broadcasts. Safe to call before any other frames — the sender
-      // handles HELLO on message receipt, not in a specific order.
       peer.send(serializeHello(getLocalViewerName()));
+      logEvent(`handshake <em>completed</em> · direct p2p`);
+      initStatsPolling(peer.connection);
     },
     onSignalingError: (_code, message, fatal) => {
       setConnectionStatus("signaling-error");
       setConnectionDetail(message, fatal ? "error" : "warning");
+      logEvent(`signalling <b>error</b> · ${escapeForLog(message)}`);
     },
     onPhase: (phase) => {
       setConnectionPhase(phase);
-      // Update the subtitle to mirror the stepper for screen readers
-      // and small viewports where the stepper might wrap awkwardly.
       switch (phase) {
         case "contacting-server":
           setConnectionDetail("Reaching the rendezvous server…", "info");
@@ -75,12 +76,15 @@ function startViewer(serverUrl: string, roomId: string): void {
         case "queued":
           setConnectionDetail(
             "Waiting for the sender to pick up your handshake…", "info");
+          logEvent("ticket <b>queued</b> · waiting for sender poll");
           break;
         case "negotiating":
           setConnectionDetail("Negotiating peer-to-peer connection…", "info");
+          logEvent("offer / answer <b>exchanged</b>");
           break;
         case "connected":
           setConnectionDetail("Connected. Waiting for first frame…", "info");
+          logEvent("direct channel <b>open</b>");
           break;
         case "failed":
           setConnectionDetail("Connection failed. Try refreshing.", "error");
@@ -114,6 +118,8 @@ function startViewer(serverUrl: string, roomId: string): void {
             setPresence(msg.names);
             break;
           case "keepalive":
+            markKeepalive();
+            break;
           case "ready":
             break;
         }
@@ -124,21 +130,22 @@ function startViewer(serverUrl: string, roomId: string): void {
     onClose: () => {
       setConnectionStatus("disconnected");
       setConnectionDetail("Disconnected.", "warning");
+      logEvent("connection <b>closed</b>");
+      // Safety net: if the sender closed the DataChannel without an
+      // explicit END frame but the task had effectively completed,
+      // show the Ko-fi prompt anyway.
+      maybeShowCompletionOnClose();
     },
     onStateChange: (state) => {
-      // Header chip + footer signal indicator. The card stepper +
-      // subtitle text are driven by onPhase above (more granular).
       if (state === "connecting" || state === "queued") {
         setConnectionStatus("connecting");
       } else if (state === "connected") {
         setConnectionStatus("connected");
         setConnectionDetail("Connected. Receiving live updates.", "info");
       } else if (state === "disconnected") {
-        // Transient WebRTC blip — peer.ts is holding the connection
-        // open during a recovery grace window. Show a soft warning so
-        // the user knows the link degraded but we haven't given up.
         setConnectionStatus("connecting");
         setConnectionDetail("Connection degraded — trying to recover…", "warning");
+        logEvent("connection <em>degraded</em> · waiting on recovery");
       }
     },
   });
@@ -146,130 +153,18 @@ function startViewer(serverUrl: string, roomId: string): void {
   peer.start();
 }
 
-// --- Demo animation for landing page ---
-
-function startDemoAnimation(): void {
-  const tasks = [
-    { label: "Training model",      total: 1200, rate: 18.3,  unit: "ep" },
-    { label: "Downloading dataset", total: 8400, rate: 142.0, unit: "files" },
-    { label: "Processing images",   total: 3600, rate: 55.2,  unit: "it" },
-  ];
-
-  const CYCLE_SEC = 10;
-  const FILL_FRAC = 0.88; // reach 100% at 88% of cycle, hold briefly
-
-  const titleEl    = document.getElementById("demo-title");
-  const subtitleEl = document.getElementById("demo-subtitle");
-  const pctNumEl   = document.getElementById("demo-pct-num");
-  const wrapEl     = document.getElementById("demo-percent-wrap");
-  const fillEl     = document.getElementById("demo-fill") as HTMLElement | null;
-  const dotEl      = document.getElementById("demo-dot") as HTMLElement | null;
-  const rateEl     = document.getElementById("demo-rate");
-  const unitEl     = document.getElementById("demo-unit");
-  const elapsedEl  = document.getElementById("demo-elapsed");
-  const etaEl      = document.getElementById("demo-eta");
-
-  if (!titleEl || !fillEl || !dotEl) return;
-
-  let taskIdx = 0;
-  let cycleStart = performance.now() / 1000;
-
-  function applyTask(idx: number) {
-    const t = tasks[idx];
-    if (titleEl) titleEl.textContent = t.label;
-    if (unitEl) unitEl.textContent = `${t.unit}/s`;
-    if (rateEl) rateEl.textContent = t.rate >= 10 ? t.rate.toFixed(0) : t.rate.toFixed(1);
-  }
-  applyTask(taskIdx);
-
-  function tick() {
-    const now = performance.now() / 1000;
-    let cycleElapsed = now - cycleStart;
-    if (cycleElapsed >= CYCLE_SEC) {
-      cycleStart = now;
-      taskIdx = (taskIdx + 1) % tasks.length;
-      applyTask(taskIdx);
-      cycleElapsed = 0;
-    }
-
-    const t = tasks[taskIdx];
-    const progress = Math.min(1, cycleElapsed / CYCLE_SEC / FILL_FRAC);
-    const pct = Math.round(progress * 100);
-    const n = Math.round(progress * t.total);
-    const totalElapsed = progress * (t.total / t.rate);
-    const remaining = t.total - n;
-    const etaSec = t.rate > 0 ? remaining / t.rate : 0;
-
-    if (pctNumEl) pctNumEl.textContent = String(pct);
-    if (wrapEl) wrapEl.dataset.progressTier = demoTier(pct);
-    fillEl!.style.width = `${pct}%`;
-    dotEl!.style.left = `${pct}%`;
-    if (subtitleEl) subtitleEl.textContent = `${fmtNum(n)} / ${fmtNum(t.total)} ${t.unit}`;
-    if (elapsedEl) elapsedEl.textContent = formatDemoTime(totalElapsed);
-    if (etaEl) etaEl.textContent = progress >= 1 ? "done" : formatDemoTime(etaSec);
-
-    requestAnimationFrame(tick);
-  }
-
-  requestAnimationFrame(tick);
-}
-
-function demoTier(pct: number): string {
-  if (pct >= 100) return "done";
-  if (pct >= 70) return "high";
-  if (pct >= 35) return "mid";
-  return "low";
-}
-
-function fmtNum(n: number): string {
-  return n.toLocaleString("en-US").replace(/,/g, " ");
-}
-
-function formatDemoTime(seconds: number): string {
-  const s = Math.round(seconds);
-  if (s < 60) return `0:${String(s).padStart(2, "0")}`;
-  const m = Math.floor(s / 60);
-  return `${m}:${String(s % 60).padStart(2, "0")}`;
-}
-
-// --- Entry ---
-
-// --- Landing language picker -----------------------------------------------
-
-function initLangPicker(): void {
-  const tabs  = document.querySelectorAll<HTMLButtonElement>(".lang-tab[data-lang]");
-  const panes = document.querySelectorAll<HTMLElement>(".lang-pane[data-lang]");
-  const card  = document.querySelector<HTMLElement>(".lang-card");
-  if (tabs.length === 0) return;
-
-  const select = (lang: string) => {
-    tabs.forEach((t) => {
-      const active = t.dataset.lang === lang;
-      t.classList.toggle("is-active", active);
-      t.setAttribute("aria-selected", String(active));
-    });
-    panes.forEach((p) => {
-      const match = p.dataset.lang === lang;
-      if (match) p.removeAttribute("hidden");
-      else       p.setAttribute("hidden", "");
-    });
-    if (card) card.dataset.activeLang = lang;
-  };
-
-  tabs.forEach((t) => {
-    t.addEventListener("click", () => {
-      const lang = t.dataset.lang;
-      if (lang) select(lang);
-    });
-  });
+function escapeForLog(s: string): string {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
 }
 
 function main(): void {
   const params = parseFragment();
   if (!params) {
+    // No room fragment on app.html — the inline script in head should
+    // already have bounced, but guard anyway.
     showLanding();
-    startDemoAnimation();
-    initLangPicker();
     return;
   }
 

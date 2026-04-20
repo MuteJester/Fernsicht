@@ -101,6 +101,12 @@ export class ViewerPeer {
     }
   }
 
+  // Exposed for stats polling (getStats, selected ICE pair inspection) in ui
+  // code. Read-only surface; don't mutate the connection from outside.
+  get connection(): RTCPeerConnection {
+    return this.pc;
+  }
+
   close(): void {
     this.closed = true;
     this.clearDisconnectGrace();

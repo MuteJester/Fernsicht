@@ -1,377 +1,557 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Fernsicht</title>
-    <link rel="icon" type="image/x-icon" href="./favicon.ico" />
-    <link rel="stylesheet" href="/src/style.css" />
-  </head>
-  <body>
-    <div id="app">
-      <!-- Landing page -->
-      <div id="landing" class="hidden">
-        <!-- Hero -->
-        <section class="hero">
-          <div class="hero-logo-wrap">
-            <div class="logo-bubbles" aria-hidden="true">
-              <span class="logo-bubble"></span>
-              <span class="logo-bubble"></span>
-              <span class="logo-bubble"></span>
-              <span class="logo-bubble"></span>
-              <span class="logo-bubble"></span>
-            </div>
-            <img src="./logo.png" alt="Fernsicht" class="hero-logo" />
-          </div>
-          <h1>Fernsicht</h1>
-          <p class="tagline">Watch your code's progress from anywhere.<br/>Peer-to-peer. No accounts. No servers in the way.</p>
-        </section>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Viewer · Fernsicht</title>
+<meta name="description" content="Live viewer for a Fernsicht observation — progress, rate, handshake timeline, and anyone else watching." />
+<link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
 
-        <!-- Live demo — mini observation card -->
-        <section class="demo-section">
-          <article class="card card--focus card--demo" id="demo-card">
-            <span class="corner corner--tl"></span>
-            <span class="corner corner--tr"></span>
-            <span class="corner corner--bl"></span>
-            <span class="corner corner--br"></span>
-            <span class="card-label">
+<!--
+  Fallback for bare /app.html (no #room=...).
+  The CLI always produces URLs with a room fragment; if someone lands
+  here without one, send them to the landing page rather than show an
+  empty viewer shell.
+-->
+<script>
+  (function () {
+    var h = window.location.hash || "";
+    if (!/\broom=/.test(h)) {
+      window.location.replace("/");
+    }
+  })();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/fernsicht.css" />
+
+<style>
+  /* ══════════════════════════════════════════════════════════════════
+     COMPLETION CARD
+     Appears when the viewer reaches 100 %. Soft entrance, measured
+     auto-dismiss timer, never blocks the UI. Tone: grateful, quiet.
+     ══════════════════════════════════════════════════════════════════ */
+  .done-card{
+    position: relative;
+    margin-top: 28px;
+    animation: doneCardIn 720ms cubic-bezier(.2,.7,.2,1) both;
+  }
+  .done-card[hidden]{ display: none; }
+  .done-card.is-leaving{
+    animation: doneCardOut 420ms cubic-bezier(.4,0,.4,1) forwards;
+  }
+  @keyframes doneCardIn{
+    0%   { opacity: 0; transform: translateY(10px) scale(.985); filter: blur(2px); }
+    60%  { opacity: 1; filter: blur(0); }
+    100% { opacity: 1; transform: translateY(0)   scale(1);     }
+  }
+  @keyframes doneCardOut{
+    0%   { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-6px); }
+  }
+
+  .done-card-frame{
+    position: relative;
+    padding: 26px 28px 20px;
+    background:
+      linear-gradient(180deg,
+        oklch(0.78 0.17 150 / 0.06) 0%,
+        oklch(0.78 0.17 150 / 0.015) 48%,
+        transparent 100%),
+      var(--surface);
+    border: 1px solid var(--signal);
+    border-radius: 3px;
+    box-shadow:
+      0 0 0 1px oklch(0.78 0.17 150 / 0.10),
+      0 24px 48px -24px oklch(0.78 0.17 150 / 0.25);
+    overflow: hidden;
+  }
+
+  /* Faint diagonal scan — "instrument just finished calibration" */
+  .done-card-frame::before{
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(115deg,
+      transparent 30%,
+      oklch(0.78 0.17 150 / 0.06) 50%,
+      transparent 70%);
+    background-size: 220% 100%;
+    background-position: 120% 0;
+    animation: doneScan 2.4s ease-out forwards;
+    pointer-events: none;
+  }
+  @keyframes doneScan{
+    0%   { background-position: 120% 0; }
+    100% { background-position: -20% 0; }
+  }
+
+  .done-card-head{
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+    position: relative;
+  }
+  .done-card-kicker{
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--signal);
+  }
+  .done-card-kicker-dot{
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--signal);
+    box-shadow: 0 0 0 3px var(--signal-soft);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  .done-card-close{
+    width: 24px; height: 24px;
+    display: grid; place-items: center;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--ink-4);
+    border: 1px solid transparent;
+    border-radius: 2px;
+    background: transparent;
+    cursor: pointer;
+    transition: color .18s, border-color .18s, background .18s;
+  }
+  .done-card-close:hover{ color: var(--ink); border-color: var(--hairline); background: var(--bg-deeper); }
+
+  .done-card-body{ position: relative; }
+
+  .done-card-checkline{
+    display: inline-flex; align-items: center; gap: 10px;
+    margin-bottom: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .done-card-check{
+    width: 18px; height: 18px;
+    color: var(--signal);
+    stroke-dasharray: 30;
+    stroke-dashoffset: 30;
+    animation: doneCheck 650ms cubic-bezier(.6,.1,.3,1) .25s forwards;
+  }
+  @keyframes doneCheck{
+    to { stroke-dashoffset: 0; }
+  }
+  .done-card-stat{
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+  .done-card-statlabel{ color: var(--ink-4); }
+
+  .done-card-title{
+    font-family: var(--sans);
+    font-size: clamp(22px, 2.6vw, 28px);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    color: var(--ink);
+    margin: 0 0 10px;
+    text-wrap: balance;
+    max-width: 28ch;
+  }
+  .done-card-title em{
+    font-style: normal;
+    color: var(--signal);
+    font-weight: 500;
+  }
+  .done-card-copy{
+    color: var(--ink-2);
+    font-size: 14.5px;
+    line-height: 1.6;
+    max-width: 64ch;
+    margin: 0 0 20px;
+    text-wrap: pretty;
+  }
+
+  .done-card-actions{
+    display: flex; flex-wrap: wrap; gap: 10px;
+    align-items: center;
+  }
+  .done-card-btn{
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 11px 16px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid var(--hairline);
+    border-radius: 2px;
+    color: var(--ink);
+    text-decoration: none;
+    background: transparent;
+    transition: background .18s, border-color .18s, color .18s, transform .18s;
+    cursor: pointer;
+  }
+  .done-card-btn svg{ width: 14px; height: 14px; }
+  .done-card-btn:hover{ background: var(--surface); border-color: var(--hairline-2); }
+  .done-card-btn:active{ transform: translateY(1px); }
+  .done-card-btn--primary{
+    background: var(--signal);
+    color: var(--bg);
+    border-color: var(--signal);
+  }
+  .done-card-btn--primary:hover{ background: var(--signal-deep); border-color: var(--signal-deep); color: var(--bg); }
+  .done-card-btn--ghost{
+    color: var(--ink-3);
+    background: transparent;
+  }
+  .done-card-btn--ghost:hover{ color: var(--ink); background: var(--bg-deeper); }
+
+  .done-card-timer{
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 2px;
+    background: oklch(1 0 0 / 0.035);
+    overflow: hidden;
+  }
+  .done-card-timer-fill{
+    position: absolute; inset: 0;
+    width: 100%;
+    background: linear-gradient(90deg, var(--signal-deep), var(--signal));
+    transform-origin: left center;
+    box-shadow: 0 0 10px var(--signal-soft);
+  }
+  .done-card-timer-fill.is-running{
+    animation: doneTimer 20s linear forwards;
+  }
+  .done-card-timer-fill.is-paused{
+    animation-play-state: paused;
+  }
+  @keyframes doneTimer{
+    from { transform: scaleX(1); }
+    to   { transform: scaleX(0); }
+  }
+
+  @media (max-width: 640px){
+    .done-card-frame{ padding: 22px 20px 18px; }
+    .done-card-actions{ flex-direction: column; align-items: stretch; }
+    .done-card-btn{ justify-content: center; }
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    .done-card,
+    .done-card-frame::before,
+    .done-card-check,
+    .done-card-kicker-dot,
+    .done-card-timer-fill.is-running{
+      animation: none !important;
+    }
+    .done-card-check{ stroke-dashoffset: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═════════ TOP RAIL ═════════ -->
+<nav class="rail">
+  <div class="rail-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--signal)">
+          <path d="M4 22 C 12 8, 32 8, 40 22 C 32 36, 12 36, 4 22 Z" />
+          <circle cx="22" cy="22" r="8.5" />
+          <rect x="15.5" y="19.5" width="13" height="5" rx="2.5" fill="currentColor" opacity="0.18" />
+          <rect x="15.5" y="19.5" width="7.5" height="5" rx="2.5" fill="currentColor" />
+        </svg>
+      </span>
+      <span class="brand-word">Fernsicht <span>/ viewer</span></span>
+    </a>
+
+    <div class="rail-center" aria-hidden="true">
+      <span>room</span>
+      <span class="dash">/</span>
+      <span id="railRoom" style="color: var(--ink-2)">—</span>
+      <span class="dash">/</span>
+      <span>p2p · webrtc</span>
+    </div>
+
+    <div class="rail-right">
+      <span class="status-chip" id="statusChip">Connecting</span>
+      <a class="rail-btn" href="/">Home</a>
+      <a class="rail-btn rail-btn--primary" href="install.html">Install</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═════════ VIEWER BENCH ═════════ -->
+<main class="viewer-shell">
+  <section class="viewer-bench">
+    <div class="shell">
+      <div class="bench-grid">
+
+        <!-- ── LEFT RAIL: session info + share + handshake ─────── -->
+        <aside class="bench-left" aria-label="Session">
+
+          <div class="rail-block" data-collapsible>
+            <header class="rail-block-head"><b>Session</b><span>observation</span></header>
+            <div class="rail-block-body">
+              <dl class="kv">
+                <dt>Room</dt><dd id="sessRoom">—</dd>
+                <dt>Host</dt><dd class="dim">remote</dd>
+                <dt>Started</dt><dd id="sessStarted">—</dd>
+                <dt>Transport</dt><dd class="dim" id="sessTransport">negotiating</dd>
+                <dt>Signalling</dt><dd class="dim">signal.fernsicht.space</dd>
+                <dt>Latency</dt><dd><span id="latency">—</span> ms</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div class="rail-block" data-collapsible>
+            <header class="rail-block-head"><b>Share</b><span>copy or bookmark</span></header>
+            <div class="rail-block-body">
+              <div class="share">
+                <span class="share-url" id="shareUrl">—</span>
+                <button class="share-btn" id="shareCopy">Copy</button>
+              </div>
+              <p style="font-family: var(--mono); font-size: 10.5px; color: var(--ink-4); letter-spacing: 0.08em; margin-top: 10px; line-height: 1.6;">
+                The link works until the host process exits. No account needed to open it.
+              </p>
+            </div>
+          </div>
+
+          <div class="rail-block" data-collapsible>
+            <header class="rail-block-head"><b>Handshake</b><span>p2p pairing</span></header>
+            <div class="rail-block-body">
+              <ol class="stepper" id="handshake">
+                <li class="is-active" data-phase="contacting-server">
+                  <span class="dot"></span>
+                  <span class="label">Reaching signalling</span>
+                  <span class="timing"></span>
+                </li>
+                <li data-phase="queued">
+                  <span class="dot"></span>
+                  <span class="label">Awaiting sender check-in</span>
+                  <span class="timing"></span>
+                </li>
+                <li data-phase="negotiating">
+                  <span class="dot"></span>
+                  <span class="label">Exchanging ICE candidates</span>
+                  <span class="timing"></span>
+                </li>
+                <li data-phase="connected">
+                  <span class="dot"></span>
+                  <span class="label">Direct channel open</span>
+                  <span class="timing"></span>
+                </li>
+                <li data-phase="streaming">
+                  <span class="dot"></span>
+                  <span class="label">Streaming progress</span>
+                  <span class="timing"></span>
+                </li>
+              </ol>
+            </div>
+          </div>
+
+        </aside>
+
+        <!-- ── CENTER: main instrument ─────────────────────────── -->
+        <section class="inst" aria-label="Live observation">
+          <div class="inst-strip">
+            <span class="inst-strip-left">
               <span>Observation</span>
-              <strong>demo</strong>
+              <span class="id" id="stripRoom">—</span>
+              <span class="spectrum" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></span>
             </span>
-            <div class="card-body">
-              <div class="card-head">
-                <div>
-                  <h3 class="title" id="demo-title">Training model</h3>
-                  <p class="subtitle" id="demo-subtitle">0 / 1 200 epochs</p>
-                </div>
-              </div>
-              <div class="percent" id="demo-percent-wrap" data-progress-tier="low">
-                <span id="demo-pct-num">0</span><span class="percent-sign">%</span>
-              </div>
-              <div class="horizon-block">
-                <div class="horizon">
-                  <div class="horizon-fill" id="demo-fill"></div>
-                  <div class="horizon-dot" id="demo-dot"></div>
-                </div>
-              </div>
-              <div class="divider"></div>
-              <div class="stats stats--compact">
-                <div class="stat stat--secondary">
-                  <span class="stat-key">Rate</span>
-                  <div class="stat-value-row">
-                    <span class="stat-value-med" id="demo-rate">18</span>
-                    <span class="stat-value-unit" id="demo-unit">ep/s</span>
-                  </div>
-                </div>
-                <div class="stat stat--secondary">
-                  <span class="stat-key">Elapsed</span>
-                  <div class="stat-value-row">
-                    <span class="stat-value-med" id="demo-elapsed">0:00</span>
-                  </div>
-                </div>
-                <div class="stat stat--secondary">
-                  <span class="stat-key">ETA</span>
-                  <div class="stat-value-row">
-                    <span class="stat-value-med" id="demo-eta">1:05</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </article>
-        </section>
-
-        <!-- How it works -->
-        <section class="steps-section">
-          <div class="section-label">How it works</div>
-          <div class="steps">
-            <div class="step">
-              <div class="step-num">01</div>
-              <div class="step-body">
-                <h3>Add one line</h3>
-                <div class="lang-picker">
-                  <div class="lang-tabs" role="tablist" aria-label="Language">
-                    <button
-                      class="lang-tab is-active"
-                      role="tab"
-                      aria-selected="true"
-                      data-lang="cli"
-                      type="button"
-                    >shell</button>
-                    <button
-                      class="lang-tab"
-                      role="tab"
-                      aria-selected="false"
-                      data-lang="python"
-                      type="button"
-                    >python</button>
-                    <button
-                      class="lang-tab"
-                      role="tab"
-                      aria-selected="false"
-                      data-lang="r"
-                      type="button"
-                    >r</button>
-                    <span class="lang-tab-soon" aria-hidden="true">julia · ruby · matlab · lua · next</span>
-                  </div>
-
-                  <div class="lang-card" data-active-lang="cli">
-                    <!-- Shell / CLI pane (default — wraps any tool) -->
-                    <div class="lang-pane" data-lang="cli">
-                      <div class="lang-pane-head">
-                        <span class="lang-pane-label">install</span>
-                        <code class="lang-pane-cmd">curl -fsSL https://github.com/MuteJester/Fernsicht/releases/latest/download/install.sh | sh</code>
-                      </div>
-                      <div class="lang-pane-divider"></div>
-                      <pre class="lang-pane-code"><span class="lang-comment"># Wraps any command in any language. No SDK, no code change.</span>
-$ fernsicht run -- pip install pandas
-
-<span class="lang-output"><span class="lang-output-prefix">→</span> <span class="lang-url">https://app.fernsicht.space#room=abc12345</span></span></pre>
-                    </div>
-                    <!-- Python pane -->
-                    <div class="lang-pane" data-lang="python" hidden>
-                      <div class="lang-pane-head">
-                        <span class="lang-pane-label">install</span>
-                        <code class="lang-pane-cmd">pip install fernsicht</code>
-                      </div>
-                      <div class="lang-pane-divider"></div>
-                      <pre class="lang-pane-code"><span class="lang-keyword">from</span> fernsicht <span class="lang-keyword">import</span> blick
-
-<span class="lang-comment"># URL printed once — share it; viewers watch live in any browser.</span>
-<span class="lang-keyword">for</span> item <span class="lang-keyword">in</span> blick(items):
-    process(item)
-
-<span class="lang-output"><span class="lang-output-prefix">→</span> <span class="lang-url">https://app.fernsicht.space#room=abc12345</span></span></pre>
-                    </div>
-                    <!-- R pane -->
-                    <div class="lang-pane" data-lang="r" hidden>
-                      <div class="lang-pane-head">
-                        <span class="lang-pane-label">install</span>
-                        <code class="lang-pane-cmd">remotes::install_github(<span class="lang-string">"MuteJester/Fernsicht"</span>, subdir = <span class="lang-string">"publishers/r"</span>)</code>
-                      </div>
-                      <div class="lang-pane-divider"></div>
-                      <pre class="lang-pane-code"><span class="lang-keyword">library</span>(fernsicht)
-
-<span class="lang-comment"># URL printed once — share it; viewers watch live in any browser.</span>
-results &lt;- blick(items, process)
-
-<span class="lang-output"><span class="lang-output-prefix">→</span> <span class="lang-url">https://app.fernsicht.space#room=abc12345</span></span></pre>
-                    </div>
-                  </div>
-                </div>
-                <p>Wrap any loop, long task, or shell command. The CLI works with no code change; the Python and R SDKs offer a one-import path inside your code.</p>
-              </div>
-            </div>
-            <div class="step-connector"></div>
-            <div class="step">
-              <div class="step-num">02</div>
-              <div class="step-body">
-                <h3>Run your code</h3>
-                <p>A shareable link appears in your terminal. Send it to anyone.</p>
-              </div>
-            </div>
-            <div class="step-connector"></div>
-            <div class="step">
-              <div class="step-num">03</div>
-              <div class="step-body">
-                <h3>Watch from anywhere</h3>
-                <p>Open the link on any device. Progress streams directly, peer-to-peer.</p>
-              </div>
-            </div>
+            <span class="inst-strip-right">
+              <span id="transport">negotiating</span>
+              <span>·</span>
+              <span><span id="viewerCount">0</span> watching</span>
+            </span>
           </div>
-        </section>
 
-        <!-- CTA -->
-        <section class="cta-section">
-          <a
-            class="cta-secondary"
-            href="https://github.com/MuteJester/fernsicht"
-            target="_blank"
-            rel="noopener noreferrer"
-          >View on GitHub</a>
-        </section>
-      </div>
+          <div class="inst-body">
 
-      <!-- Viewer: observation shell -->
-      <div id="viewer-view" class="viewer-shell hidden">
-        <header class="viewer-header">
-          <div class="viewer-container">
-            <div class="brand">
-              <span class="brand-mark" aria-hidden="true"></span>
-              <span>Fernsicht</span>
+            <div class="inst-head">
+              <div>
+                <div class="inst-task" id="taskTitle">Awaiting signal</div>
+                <div class="inst-sub" id="taskSub">Connecting to sender…</div>
+              </div>
+              <span class="task-badge" id="taskBadge">Connecting</span>
             </div>
-            <div class="header-state">
-              <a
-                class="support-btn"
-                href="https://ko-fi.com/fernsicht"
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Support Fernsicht on Ko-fi"
-              >
-                <span class="support-btn-icon" aria-hidden="true">☕</span>
-                <span class="support-btn-label">Support</span>
-              </a>
-              <span id="connection-status" class="status status--connecting">
-                <span class="status-dot"></span>
-                <span id="connection-label">Connecting</span>
-              </span>
+
+            <div class="inst-readout">
+              <span id="pct">0</span><span class="pct">%</span>
+              <span class="frac"><span id="fracLabel">items</span> <span id="fracN">—</span> · <span id="fracT">—</span></span>
             </div>
-          </div>
-        </header>
 
-        <main class="viewer-main">
-          <div class="viewer-container">
-            <section class="card card--focus is-connecting" id="observation-card">
-              <span class="corner corner--tl"></span>
-              <span class="corner corner--tr"></span>
-              <span class="corner corner--bl"></span>
-              <span class="corner corner--br"></span>
+            <div class="horizon inst-horizon">
+              <div class="horizon-track">
+                <div class="horizon-fill" id="fill" style="width: 0%"></div>
+                <span class="horizon-dot" id="dot" style="left: 0%"></span>
+              </div>
+              <div class="horizon-ticks" aria-hidden="true">
+                <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+              </div>
+            </div>
 
-              <span class="card-label">
-                <span>Observation</span>
-                <strong id="room-label">—</strong>
-              </span>
+            <div class="inst-divider"></div>
 
-              <div class="card-body">
-                <header class="card-head">
-                  <div>
-                    <h1 class="title" id="obs-title">Awaiting signal</h1>
-                    <p class="subtitle" id="obs-subtitle">Connecting to sender…</p>
-                  </div>
+            <div class="inst-stats">
+              <div class="inst-stat inst-stat--primary">
+                <span class="stat-key">ETA</span>
+                <span class="inst-stat-val"><span id="eta">—</span></span>
+              </div>
+              <div class="inst-stat">
+                <span class="stat-key">Rate</span>
+                <span class="inst-stat-val"><span id="rate">—</span><small id="rateUnit">/s</small></span>
+              </div>
+              <div class="inst-stat">
+                <span class="stat-key">Elapsed</span>
+                <span class="inst-stat-val" id="elapsed">—</span>
+              </div>
+              <div class="inst-stat">
+                <span class="stat-key">Items</span>
+                <span class="inst-stat-val"><span id="fracN3">—</span><small>of <span id="fracT3">—</span></small></span>
+              </div>
+            </div>
+
+            <!-- Error / warning banner (NOT completion — see done-card below) -->
+            <aside class="task-banner" id="taskBanner" hidden>
+              <span class="task-banner-icon" id="taskBannerIcon" aria-hidden="true">!</span>
+              <span class="task-banner-text" id="taskBannerText"></span>
+              <button class="task-banner-close" id="taskBannerClose" aria-label="Dismiss" type="button">×</button>
+            </aside>
+
+            <!-- ═════════ COMPLETION CARD ═════════
+                 Shown when a task reaches 100 %. Auto-dismisses after
+                 20 s unless the viewer hovers/focuses. -->
+            <aside class="done-card" id="doneCard" hidden aria-live="polite">
+              <div class="done-card-frame">
+                <span class="reg reg--tl"></span><span class="reg reg--tr"></span>
+                <span class="reg reg--bl"></span><span class="reg reg--br"></span>
+
+                <header class="done-card-head">
+                  <span class="done-card-kicker">
+                    <span class="done-card-kicker-dot"></span>
+                    OBSERVATION COMPLETE
+                  </span>
+                  <button class="done-card-close" id="doneCardClose" aria-label="Dismiss" type="button">×</button>
                 </header>
 
-                <ol class="connect-stepper" id="connect-stepper">
-                  <li class="connect-step is-pending" data-phase="contacting-server">
-                    <span class="connect-step-dot"></span>
-                    <div class="connect-step-text">
-                      <span class="connect-step-label">Reaching the rendezvous server</span>
-                    </div>
-                  </li>
-                  <li class="connect-step is-pending" data-phase="queued">
-                    <span class="connect-step-dot"></span>
-                    <div class="connect-step-text">
-                      <span class="connect-step-label">Awaiting sender check-in</span>
-                      <span class="connect-step-detail" id="connect-step-countdown"></span>
-                    </div>
-                  </li>
-                  <li class="connect-step is-pending" data-phase="negotiating">
-                    <span class="connect-step-dot"></span>
-                    <div class="connect-step-text">
-                      <span class="connect-step-label">Negotiating peer-to-peer link</span>
-                    </div>
-                  </li>
-                  <li class="connect-step is-pending" data-phase="connected">
-                    <span class="connect-step-dot"></span>
-                    <div class="connect-step-text">
-                      <span class="connect-step-label">Connected — waiting for first frame</span>
-                    </div>
-                  </li>
-                </ol>
-
-                <div class="percent" id="percent-wrap" data-progress-tier="low">
-                  <span id="obs-percent">0</span><span class="percent-sign">%</span>
-                </div>
-
-                <div class="horizon-block">
-                  <div class="horizon">
-                    <div class="horizon-fill" id="obs-fill"></div>
-                    <div class="horizon-dot" id="obs-dot"></div>
+                <div class="done-card-body">
+                  <div class="done-card-checkline">
+                    <svg class="done-card-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M5 12.5 L10 17.5 L19 7" />
+                    </svg>
+                    <span class="done-card-stat" id="doneCardElapsed">—</span>
+                    <span class="done-card-statlabel">elapsed</span>
                   </div>
-                  <div class="scale">
-                    <span class="scale-item">
-                      <span class="scale-key">Started</span>
-                      <span class="scale-value" id="obs-start">—</span>
-                    </span>
-                    <span class="scale-item scale-item--end">
-                      <span class="scale-key">ETA</span>
-                      <span class="scale-value" id="obs-eta-clock">—</span>
-                    </span>
+
+                  <h3 class="done-card-title">
+                    If Fernsicht helped, <em>keep it alive</em>.
+                  </h3>
+                  <p class="done-card-copy">
+                    Fernsicht is free and peer-to-peer, and stays that way. A small donation keeps the signalling server up and development moving — so it stays free for everyone.
+                  </p>
+
+                  <div class="done-card-actions">
+                    <a class="done-card-btn done-card-btn--primary"
+                       href="https://ko-fi.com/fernsicht"
+                       target="_blank" rel="noopener noreferrer">
+                      <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path d="M2.5 5 h7 a2 2 0 0 1 0 4 h-1 M2.5 5 v5 a1.5 1.5 0 0 0 1.5 1.5 h3 a1.5 1.5 0 0 0 1.5 -1.5 v-5 z M4.5 2.5 v1 M6.5 2 v1.5 M8 2.5 v1" stroke-linecap="round"/>
+                      </svg>
+                      Buy the server a coffee
+                    </a>
+                    <button class="done-card-btn done-card-btn--ghost" id="doneCardMaybe" type="button">
+                      Maybe later
+                    </button>
                   </div>
                 </div>
 
-                <div class="divider"></div>
-
-                <div class="stats">
-                  <div class="stat stat--primary">
-                    <span class="stat-key">Time remaining</span>
-                    <div class="stat-value-row">
-                      <span class="stat-value-big" id="stat-eta">—</span>
-                    </div>
-                  </div>
-
-                  <div class="stat stat--secondary">
-                    <span class="stat-key">Rate</span>
-                    <div class="stat-value-row">
-                      <span class="stat-value-med" id="stat-rate">—</span>
-                      <span class="stat-value-unit" id="stat-rate-unit">items/s</span>
-                    </div>
-                  </div>
-
-                  <div class="stat stat--secondary">
-                    <span class="stat-key">Items</span>
-                    <div class="stat-value-row">
-                      <span class="stat-value-med" id="stat-items">—</span>
-                      <span class="stat-value-unit">
-                        <span class="stat-value-dim">of</span>
-                        <span id="stat-total">—</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div class="stat stat--tertiary">
-                    <span class="stat-key">Elapsed</span>
-                    <span class="stat-value" id="stat-elapsed">—</span>
-                  </div>
+                <!-- Auto-dismiss timer bar -->
+                <div class="done-card-timer" aria-hidden="true">
+                  <div class="done-card-timer-fill" id="doneCardTimerFill"></div>
                 </div>
-
-                <aside class="completion-note" id="completion-note" hidden>
-                  <span>Your task ran peer-to-peer thanks to Fernsicht. Support development and help keep our servers and infrastructure alive and free for everyone.</span>
-                  <a
-                    class="completion-note-link"
-                    href="https://ko-fi.com/fernsicht"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >Support on Ko-fi →</a>
-                </aside>
               </div>
-            </section>
-
-            <aside class="viewers">
-              <div class="viewers-head">
-                <span class="viewers-label">Viewers</span>
-                <span class="viewers-count" id="viewers-count">0</span>
-              </div>
-              <div class="viewers-list" id="viewers-list"></div>
             </aside>
           </div>
-        </main>
+        </section>
 
-        <footer class="viewer-footer">
-          <div class="viewer-container">
-            <div class="footer-group">
-              <button class="footer-action" id="copy-link-btn">Copy viewer link</button>
-              <span class="footer-item">
-                <span class="footer-key">peer</span>
-                <span class="footer-value" id="peer-value">—</span>
-              </span>
+        <!-- ── RIGHT RAIL: viewers, metrics, log ──────────────── -->
+        <aside class="bench-right" aria-label="Viewers & log">
+
+          <div class="rail-block" data-collapsible>
+            <header class="rail-block-head"><b>Viewers</b><span id="viewerCount2">0 live</span></header>
+            <div class="rail-block-body">
+              <div class="viewers-list" id="viewers"></div>
             </div>
-            <div class="footer-group">
-              <span class="footer-item signal">
-                <span class="signal-dot" id="signal-dot"></span>
-                <span class="footer-value" id="signal-text">Connecting…</span>
-              </span>
+            <footer class="rail-block-foot">
+              <span>direct p2p · no relay</span>
+              <span>e2e encrypted</span>
+            </footer>
+          </div>
+
+          <div class="rail-block" data-collapsible>
+            <header class="rail-block-head"><b>Connection</b><span>this session</span></header>
+            <div class="metrics">
+              <div class="metric-row">
+                <span class="k">Latency</span>
+                <span class="bar"><i id="mLatency" style="width: 0%"></i></span>
+                <span class="v" id="mLatencyV">—</span>
+              </div>
+              <div class="metric-row">
+                <span class="k">Path</span>
+                <span class="bar"><i id="mPath" style="width: 0%"></i></span>
+                <span class="v" id="mPathV">—</span>
+              </div>
+              <div class="metric-row">
+                <span class="k">Signal</span>
+                <span class="bar"><i id="mSignal" style="width: 0%"></i></span>
+                <span class="v" id="mSignalV">—</span>
+              </div>
+              <div class="metric-row">
+                <span class="k">Keepalive</span>
+                <span class="bar"><i id="mKeep" style="width: 0%; background: var(--signal);"></i></span>
+                <span class="v" id="mKeepV">—</span>
+              </div>
             </div>
           </div>
-        </footer>
+
+          <div class="rail-block" data-collapsible>
+            <header class="rail-block-head"><b>Event log</b><span>session</span></header>
+            <div class="logfeed" id="log"></div>
+            <footer class="rail-block-foot">
+              <span>streamed direct</span>
+              <span>paused on blur</span>
+            </footer>
+          </div>
+
+        </aside>
+
       </div>
     </div>
-    <footer class="site-footer" id="site-footer">
-      <a
-        class="footer-link"
-        href="https://ko-fi.com/fernsicht"
-        target="_blank"
-        rel="noopener noreferrer"
-      ><span class="footer-glow">Help us keep Fernsicht free for everyone</span> — Support on Ko-fi</a>
-    </footer>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+  </section>
+
+  <!-- Bottom action bar -->
+  <footer class="viewer-bar">
+    <div class="shell viewer-bar-inner">
+      <div class="viewer-bar-left">
+        <span id="barState">CONNECTING</span>
+        <span class="dotsep"></span>
+        <span class="keyhint"><span class="keycap">F</span> fullscreen</span>
+        <span class="keyhint"><span class="keycap">C</span> copy link</span>
+      </div>
+      <div class="viewer-bar-right">
+        <span id="barTransport">stream · negotiating</span>
+        <span class="dotsep"></span>
+        <span>latency <span id="latencyFoot">—</span> ms</span>
+      </div>
+    </div>
+  </footer>
+</main>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
 </html>

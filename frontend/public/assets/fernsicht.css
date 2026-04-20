@@ -1494,9 +1494,105 @@
   box-shadow: 0 0 0 3px var(--signal-soft);
   animation: pulse 2.4s ease-in-out infinite;
 }
-.status-chip.amber{ color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
-.status-chip.amber::before{
+.status-chip.amber,
+.status-chip.warn{ color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
+.status-chip.amber::before,
+.status-chip.warn::before{
   content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--amber);
+}
+.status-chip.error{ color: var(--red); border-color: var(--red); background: color-mix(in oklch, var(--red) 14%, transparent); }
+.status-chip.error::before{
+  content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--red);
+}
+
+/* Handshake stepper — failed state */
+.stepper li.is-failed .dot{ background: var(--red); border-color: var(--red); }
+.stepper li.is-failed .label{ color: var(--red); }
+.stepper li.is-failed .timing{ color: var(--red); }
+
+/* Task banner — warning + error states inside the instrument panel
+   (completion uses the separate `.done-card`, see app.html inline styles). */
+.task-banner{
+  margin-top: 24px;
+  padding: 16px 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  background: var(--bg-deeper);
+  position: relative;
+}
+/* Explicit override — the `.task-banner { display: flex }` rule above
+   would otherwise defeat the user-agent [hidden]=>display:none default. */
+.task-banner[hidden]{ display: none; }
+.task-banner-icon{
+  font-size: 22px;
+  line-height: 1;
+  filter: saturate(1.1);
+}
+.task-banner-text{
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.task-banner--success{
+  border-color: var(--signal);
+  background: linear-gradient(135deg, var(--signal-veil), color-mix(in oklch, var(--signal) 4%, transparent));
+  color: var(--ink);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--signal) 30%, transparent) inset,
+              0 8px 24px -12px color-mix(in oklch, var(--signal) 60%, transparent);
+}
+.task-banner--warn{
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  color: var(--ink-2);
+}
+.task-banner--error{
+  border-color: var(--red);
+  background: color-mix(in oklch, var(--red) 10%, transparent);
+  color: var(--ink);
+}
+.task-banner-link{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--signal);
+  border-radius: 2px;
+  background: var(--signal);
+  color: var(--bg);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+.task-banner-link:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px -6px color-mix(in oklch, var(--signal) 65%, transparent);
+}
+.task-banner-close{
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-4);
+  width: 24px; height: 24px;
+  border-radius: 2px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+  margin-left: 2px;
+}
+.task-banner-close:hover{
+  color: var(--ink);
+  border-color: var(--hairline);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1513,8 +1609,12 @@
   .page-head{ padding: 48px 0 36px; }
   .page-head-inner{ grid-template-columns: 1fr; gap: 24px; }
   .page-head-meta{ min-width: 0; }
-  .bench-grid{ grid-template-columns: 1fr; }
+  .viewer-bench{ padding: 20px 0 60px; }
+  .bench-grid{ grid-template-columns: 1fr; gap: 16px; }
   .bench-grid .bench-right{ grid-template-columns: 1fr; }
+  .bench-grid .bench-left,
+  .bench-grid .bench-right{ order: 2; }
+  .bench-grid .inst{ order: 1; }
   .runtime-tabs{ grid-template-columns: 1fr; }
   .install-aside{ grid-template-columns: 1fr; }
   .i-step{ grid-template-columns: 1fr; gap: 4px; }
@@ -1524,4 +1624,40 @@
   .inst-readout{ font-size: clamp(64px, 20vw, 96px); }
   .inst-stats{ grid-template-columns: 1fr 1fr; gap: 20px; }
   .viewer-bar-inner{ gap: 12px; }
+
+  /* Collapse rail-blocks on mobile: header-only by default, tap-to-expand */
+  .rail-block[data-collapsible]{ cursor: pointer; }
+  .rail-block[data-collapsible] .rail-block-head{
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 38px;
+  }
+  .rail-block[data-collapsible] .rail-block-head::after{
+    content: "+";
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--ink-3);
+    line-height: 1;
+    transition: transform 0.15s ease;
+  }
+  .rail-block[data-collapsible].is-open .rail-block-head::after{
+    content: "−";
+  }
+  .rail-block[data-collapsible] .rail-block-body,
+  .rail-block[data-collapsible] .rail-block-foot,
+  .rail-block[data-collapsible] .metrics,
+  .rail-block[data-collapsible] .logfeed{
+    display: none;
+  }
+  .rail-block[data-collapsible].is-open .rail-block-body,
+  .rail-block[data-collapsible].is-open .rail-block-foot,
+  .rail-block[data-collapsible].is-open .metrics,
+  .rail-block[data-collapsible].is-open .logfeed{
+    display: revert;
+  }
 }
