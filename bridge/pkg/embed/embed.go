@@ -111,6 +111,15 @@ type Session struct {
 	bridgeErr  atomic.Pointer[error] // non-nil if bridge.Run failed
 	bridgeDone chan struct{}         // closed when bridge.Run returns
 
+	// bridgeCancel cancels the long-lived bridge context. Open() builds
+	// the bridge against context.Background() (NOT the caller's open
+	// ctx, which usually has a short timeout for the handshake) and
+	// stores the cancel here for Session.Close to invoke. Without this
+	// split, a caller passing a 30s-timeout ctx to Open would have the
+	// bridge die mid-session at the 30s mark — broadcasting END to all
+	// viewers even though the wrapped command is still running.
+	bridgeCancel context.CancelFunc
+
 	closed   atomic.Bool
 	closedCh chan struct{}
 
@@ -158,19 +167,25 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	cmdR, cmdW := io.Pipe()
 	eventR, eventW := io.Pipe()
 
+	// Long-lived bridge context: detached from the caller's open ctx so
+	// the bridge survives any short-lived timeout the caller used for
+	// the handshake. Cancelled by Session.Close (or cleanupOnError).
+	bridgeCtx, bridgeCancel := context.WithCancel(context.Background())
+
 	s := &Session{
-		cmdW:       cmdW,
-		eventR:     eventR,
-		eventDec:   json.NewDecoder(bufio.NewReaderSize(eventR, 64*1024)),
-		bridgeDone: make(chan struct{}),
-		closedCh:   make(chan struct{}),
+		cmdW:         cmdW,
+		eventR:       eventR,
+		eventDec:     json.NewDecoder(bufio.NewReaderSize(eventR, 64*1024)),
+		bridgeDone:   make(chan struct{}),
+		bridgeCancel: bridgeCancel,
+		closedCh:     make(chan struct{}),
 	}
 
-	// Launch the bridge dispatcher. Cancellation: when the caller
-	// cancels ctx, bridge.Run returns; we close the pipes and the
-	// event drain exits.
+	// Launch the bridge dispatcher. The bridge runs on bridgeCtx (NOT
+	// the open ctx) so it lives until the caller explicitly closes the
+	// session.
 	go func() {
-		err := bridge.RunWithOptions(ctx, cmdR, eventW, bridge.Options{})
+		err := bridge.RunWithOptions(bridgeCtx, cmdR, eventW, bridge.Options{})
 		_ = eventW.Close()
 		_ = cmdR.Close()
 		if err != nil {
@@ -489,10 +504,12 @@ func (s *Session) Close(ctx context.Context) error {
 	select {
 	case <-s.bridgeDone:
 	case <-ctx.Done():
-		// Timed out waiting; force-close the cmd pipe and let bridge exit.
+		// Timed out waiting; cancel bridge ctx + force-close pipe.
+		s.bridgeCancel()
 		_ = s.cmdW.Close()
 		<-s.bridgeDone
 	case <-time.After(5 * time.Second):
+		s.bridgeCancel()
 		_ = s.cmdW.Close()
 		<-s.bridgeDone
 	}
@@ -531,6 +548,7 @@ func (s *Session) sendUnchecked(cmd map[string]any) error {
 // Closing the read side breaks the pending write so bridge unblocks.
 func (s *Session) cleanupOnError() {
 	s.closed.Store(true)
+	s.bridgeCancel()
 	_ = s.eventR.Close()
 	_ = s.cmdW.Close()
 	<-s.bridgeDone
