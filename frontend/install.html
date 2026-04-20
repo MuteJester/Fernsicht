@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Install · Fernsicht</title>
+<meta name="description" content="Install Fernsicht. One static binary, or a drop-in package for Python and R. Every install path is reversible in one command." />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/fernsicht.css" />
+</head>
+<body>
+
+<!-- ═════════ TOP RAIL ═════════ -->
+<nav class="rail">
+  <div class="rail-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--signal)">
+          <path d="M4 22 C 12 8, 32 8, 40 22 C 32 36, 12 36, 4 22 Z" />
+          <circle cx="22" cy="22" r="8.5" />
+          <rect x="15.5" y="19.5" width="13" height="5" rx="2.5" fill="currentColor" opacity="0.18" />
+          <rect x="15.5" y="19.5" width="7.5" height="5" rx="2.5" fill="currentColor" />
+        </svg>
+      </span>
+      <span class="brand-word">Fernsicht <span>/ fɛʁnˌzɪçt /</span></span>
+    </a>
+
+    <div class="rail-center" aria-hidden="true">
+      <span>latest release</span>
+      <span class="dash">/</span>
+      <span>AGPL-3.0</span>
+      <span class="dash">/</span>
+      <span>CLI · Python · R</span>
+    </div>
+
+    <div class="rail-right">
+      <a class="rail-btn" href="/">Home</a>
+      <a class="rail-btn" href="https://github.com/MuteJester/Fernsicht" target="_blank" rel="noopener">GitHub</a>
+      <a class="rail-btn rail-btn--primary" href="#cli">Get started</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═════════ PAGE HEAD ═════════ -->
+<section class="page-head">
+  <div class="shell">
+    <div class="page-head-inner">
+      <div>
+        <span class="eyebrow"><span class="eyebrow-dot"></span>INSTALL · SIGNED RELEASES · REPRODUCIBLE BUILDS</span>
+        <h1>Pick your runtime. <em>One line.</em></h1>
+        <p class="page-head-lede">
+          Same protocol across every runtime — the CLI wraps any command, the Python and R packages drop into existing code. No accounts, no config file, no services to run.
+        </p>
+      </div>
+
+      <div class="page-head-meta" aria-label="Release metadata">
+        <div class="page-head-meta-row"><span>Latest</span><strong><a href="https://github.com/MuteJester/Fernsicht/releases/latest" target="_blank" rel="noopener">releases</a></strong></div>
+        <div class="page-head-meta-row"><span>License</span><strong>AGPL-3.0</strong></div>
+        <div class="page-head-meta-row"><span>Signed</span><strong>cosign (Sigstore)</strong></div>
+        <div class="page-head-meta-row"><span>Attestation</span><strong>SLSA v1.0 + SBOM</strong></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ INSTALL BODY ═════════ -->
+<section class="install-body">
+  <div class="shell">
+    <div class="install-layout">
+
+      <!-- MAIN -->
+      <div class="install-main">
+
+        <div class="runtime-tabs" role="tablist" aria-label="Runtime">
+          <button class="runtime-tab is-active" role="tab" data-target="cli" id="cli">
+            <span class="rt-kind">▸ shell</span>
+            <span class="rt-sub">wraps any command</span>
+          </button>
+          <button class="runtime-tab" role="tab" data-target="python">
+            <span class="rt-kind">▸ python</span>
+            <span class="rt-sub">3.8 +</span>
+          </button>
+          <button class="runtime-tab" role="tab" data-target="r">
+            <span class="rt-kind">▸ r</span>
+            <span class="rt-sub">4.0 +</span>
+          </button>
+        </div>
+
+        <!-- ── CLI ── -->
+        <div class="runtime-pane" data-target="cli">
+          <div class="i-step">
+            <div class="i-step-num"><b>01</b>Install</div>
+            <div>
+              <h3>Drop in the binary.</h3>
+              <p>Single static binary, ~8 MB, no runtime dependencies. macOS (arm64, x64), Linux (amd64, arm64), Windows (amd64) native. Also available as a Docker image.</p>
+              <div class="cmd">
+                <span class="cmd-label">macOS / Linux</span>
+                <code class="cmd-code" data-install>curl -fsSL https://github.com/MuteJester/Fernsicht/releases/latest/download/install.sh | sh</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <div class="cmd">
+                <span class="cmd-label">Windows (PowerShell)</span>
+                <code class="cmd-code" data-install>irm https://github.com/MuteJester/Fernsicht/releases/latest/download/install.ps1 | iex</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <div class="cmd">
+                <span class="cmd-label">Homebrew</span>
+                <code class="cmd-code" data-install>brew tap MuteJester/fernsicht && brew install fernsicht</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <div class="cmd">
+                <span class="cmd-label">Scoop</span>
+                <code class="cmd-code" data-install>scoop bucket add fernsicht https://github.com/MuteJester/scoop-fernsicht; scoop install fernsicht</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <div class="cmd">
+                <span class="cmd-label">Docker</span>
+                <code class="cmd-code" data-install>docker run --rm ghcr.io/mutejester/fernsicht:latest --version</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <p style="font-family: var(--mono); font-size: 11px; color: var(--ink-4); margin-top: 14px;">
+                Heads-up: macOS binaries aren't Apple-notarized yet (v0.1.x) — Gatekeeper will warn on the curl path. Use Homebrew to bypass, or run <code class="inline-code">xattr -d com.apple.quarantine</code> after install. Windows SmartScreen may warn on first run; click "Run anyway".
+              </p>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>02</b>Verify</div>
+            <div>
+              <h3>Check the version + signalling endpoint.</h3>
+              <p>Confirms the binary is on your PATH and that it can reach the signalling service. <code class="inline-code">fernsicht doctor</code> runs a deeper set of checks (DNS, TLS, TCP, proxy detection).</p>
+              <div class="cmd">
+                <span class="cmd-label">shell</span>
+                <code class="cmd-code" data-install>fernsicht --version &amp;&amp; fernsicht doctor</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+<pre class="i-output"><span class="arrow">→</span> fernsicht <span class="out-v">0.1.x</span>  <span class="out-dim">(signalling: https://signal.fernsicht.space, reachable)</span></pre>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>03</b>Wrap</div>
+            <div>
+              <h3>Put it in front of any command.</h3>
+              <p>Anything that prints progress becomes observable. <code class="inline-code">fernsicht run --</code> auto-detects common progress formats (<code class="inline-code">tqdm</code>, bracketed <code class="inline-code">[N/M]</code>, <code class="inline-code">N of M</code>, bare percent, <code class="inline-code">step/epoch/iter</code> keywords). For anything custom, emit a <code class="inline-code">__fernsicht__</code> magic-prefix line — see <code class="inline-code">fernsicht magic</code>.</p>
+              <div class="cmd">
+                <span class="cmd-label">example</span>
+                <code class="cmd-code" data-install>fernsicht run -- python train.py --epochs 1200</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+<pre class="i-output"><span class="arrow">→</span> <span class="url">https://app.fernsicht.space/#room=abc12345&amp;role=viewer</span>
+<span class="out-dim">  share this link — viewers open in any browser, no install</span></pre>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>04</b>Options</div>
+            <div>
+              <h3>Flags worth knowing.</h3>
+              <p>Sensible defaults. Reach for flags when you want a custom label, a cap on viewers, or a self-hosted signalling server. Full reference: <code class="inline-code">fernsicht run --help</code>.</p>
+              <div class="cmd">
+                <span class="cmd-label">label</span>
+                <code class="cmd-code" data-install>fernsicht run --label "nightly training" -- python train.py</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <div class="cmd">
+                <span class="cmd-label">viewer cap</span>
+                <code class="cmd-code" data-install>fernsicht run --max-viewers 1 -- make build</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <div class="cmd">
+                <span class="cmd-label">self-host</span>
+                <code class="cmd-code" data-install>FERNSICHT_SERVER_URL=https://signal.my.org fernsicht run -- ./sim</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── PYTHON ── -->
+        <div class="runtime-pane" data-target="python" hidden>
+          <div class="i-step">
+            <div class="i-step-num"><b>01</b>Install</div>
+            <div>
+              <h3>Pure-Python package.</h3>
+              <p>Pre-release — the wheel is not yet on PyPI. Install directly from GitHub for now; a PyPI release is coming with the next minor version.</p>
+              <div class="cmd">
+                <span class="cmd-label">pip (GitHub)</span>
+                <code class="cmd-code" data-install>pip install "git+https://github.com/MuteJester/Fernsicht.git#subdirectory=publishers/python"</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <div class="cmd">
+                <span class="cmd-label">uv</span>
+                <code class="cmd-code" data-install>uv pip install "git+https://github.com/MuteJester/Fernsicht.git#subdirectory=publishers/python"</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <p style="font-family: var(--mono); font-size: 11px; color: var(--ink-4); margin-top: 14px;">
+                Runtime deps: <code class="inline-code">aiortc</code> (WebRTC) and <code class="inline-code">aiohttp</code>. Python 3.9+ on any OS with a modern TLS stack.
+              </p>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>02</b>Wrap a loop</div>
+            <div>
+              <h3>Drop-in replacement for any iterable.</h3>
+              <p>Reports progress, rate, and ETA. Works with any sized iterator — lists, generators, DataLoaders, ranges. URL prints once on first iteration.</p>
+<pre class="i-code"><span class="kw">from</span> fernsicht <span class="kw">import</span> blick
+
+<span class="kw">for</span> epoch <span class="kw">in</span> blick(<span class="kw">range</span>(<span class="num">1200</span>), desc=<span class="str">"Training model"</span>):
+    train_one_epoch(model, epoch)</pre>
+<pre class="i-output"><span class="arrow">→</span> <span class="url">https://app.fernsicht.space/#room=abc12345&amp;role=viewer</span>  <span class="out-dim">(shown once on first iteration)</span></pre>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>03</b>Instrument manually</div>
+            <div>
+              <h3>When you don't have a loop.</h3>
+              <p>For streams, callbacks, multi-stage pipelines, or async producers — use the manual bar and call <code class="inline-code">update()</code> as progress accumulates. Close it explicitly (or with a <code class="inline-code">with</code> block).</p>
+<pre class="i-code"><span class="kw">from</span> fernsicht <span class="kw">import</span> manual
+
+<span class="kw">with</span> manual(total=n_files, desc=<span class="str">"Preprocessing"</span>) <span class="kw">as</span> bar:
+    <span class="kw">for</span> path <span class="kw">in</span> files:
+        handle(path)
+        bar.update(<span class="num">1</span>)</pre>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>04</b>Share with multiple viewers</div>
+            <div>
+              <h3>Default caps at 8 concurrent viewers.</h3>
+              <p>Same link works for everyone. The server caps rooms by default; pass <code class="inline-code">max_viewers=</code> to tighten (single-viewer) or raise (up to the server limit). No accounts, no logins, no roles.</p>
+<pre class="i-code"><span class="kw">from</span> fernsicht <span class="kw">import</span> blick
+
+<span class="kw">for</span> item <span class="kw">in</span> blick(items, desc=<span class="str">"Team demo"</span>, max_viewers=<span class="num">1</span>):
+    process(item)</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── R ── -->
+        <div class="runtime-pane" data-target="r" hidden>
+          <div class="i-step">
+            <div class="i-step-num"><b>01</b>Install</div>
+            <div>
+              <h3>Install from GitHub.</h3>
+              <p>Pre-release — CRAN submission comes with the 1.0 line. Pure R, no compiled code. Downloads a small signed helper binary on first use.</p>
+              <div class="cmd">
+                <span class="cmd-label">r</span>
+                <code class="cmd-code" data-install>remotes::install_github("MuteJester/Fernsicht", subdir = "publishers/r")</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <div class="cmd">
+                <span class="cmd-label">pak</span>
+                <code class="cmd-code" data-install>pak::pak("MuteJester/Fernsicht/publishers/r")</code>
+                <button class="copy-btn" data-copy>Copy</button>
+              </div>
+              <p style="font-family: var(--mono); font-size: 11px; color: var(--ink-4); margin-top: 14px;">
+                <b>v0.1.x known issue:</b> the lazy bridge-binary download points at a placeholder release until <code class="inline-code">bridge/v0.1.0</code> ships. Track <a href="https://github.com/MuteJester/Fernsicht/releases" target="_blank" rel="noopener">the releases page</a> — once the bridge tag lands, <code class="inline-code">blick()</code> works end-to-end. CLI users can observe their R runs today via <code class="inline-code">fernsicht run -- Rscript my-analysis.R</code>.
+              </p>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>02</b>Wrap an iterator</div>
+            <div>
+              <h3>One call over a list + a function.</h3>
+              <p>Returns the collected results, with live progress streamed to any browser.</p>
+<pre class="i-code"><span class="kw">library</span>(fernsicht)
+
+results &lt;- blick(items, process, label = <span class="str">"Sampling chains"</span>)</pre>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>03</b>Manual observation</div>
+            <div>
+              <h3>For custom loops and long simulations.</h3>
+              <p>Open a session, tick once per unit of work. The session auto-closes when the calling scope exits. <code class="inline-code">with_session()</code> + <code class="inline-code">tick()</code> are the primitives behind <code class="inline-code">blick()</code>.</p>
+<pre class="i-code"><span class="kw">library</span>(fernsicht)
+
+with_session(label = <span class="str">"Bootstrap"</span>, total = B, {
+  <span class="kw">for</span> (b <span class="kw">in</span> <span class="num">1</span>:B) {
+    resample(data)
+    tick()
+  }
+})</pre>
+            </div>
+          </div>
+
+          <div class="i-step">
+            <div class="i-step-num"><b>04</b>From an Rmd / Quarto doc</div>
+            <div>
+              <h3>Wrap any long render step.</h3>
+              <p>Drop <code class="inline-code">blick()</code> around any loop in a code chunk — the URL prints once, viewers stay attached as the doc renders.</p>
+<pre class="i-code"><span class="kw">library</span>(fernsicht)
+
+res &lt;- <span class="kw">lapply</span>(datasets, <span class="kw">function</span>(d) {
+  blick(<span class="kw">seq_len</span>(<span class="kw">nrow</span>(d)), <span class="kw">function</span>(i) fit_row(d[i, ]),
+        label = <span class="kw">paste</span>(<span class="str">"fit —"</span>, d$name[<span class="num">1</span>]))
+})</pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: requirements / FAQ -->
+      <aside class="install-aside">
+        <div class="side-block">
+          <span class="side-kicker">Requirements</span>
+          <dl class="side-list">
+            <dt>OS</dt><dd>macOS 12+ (Intel or Apple Silicon), Linux (amd64 or arm64), Windows 10+ (amd64), Docker</dd>
+            <dt>Network</dt><dd>Outbound 443 / UDP · WebRTC · STUN (for P2P)</dd>
+            <dt>Runtime</dt><dd>None (CLI) · Python 3.9+ · R 4.0+</dd>
+            <dt>Disk</dt><dd>~ 8 MB installed</dd>
+          </dl>
+        </div>
+
+        <div class="side-block">
+          <span class="side-kicker">What lands on disk</span>
+          <dl class="side-list">
+            <dt>CLI</dt><dd>one static binary in <code>/usr/local/bin</code> (or <code>~/.local/bin</code> / <code>%LOCALAPPDATA%\fernsicht\bin</code>)</dd>
+            <dt>Python</dt><dd><code>fernsicht</code> + <code>aiortc</code> + <code>aiohttp</code></dd>
+            <dt>R</dt><dd>one source package, no compilation; downloads a signed helper binary on first use</dd>
+            <dt>Config</dt><dd>none by default · optional <code>.fernsicht.toml</code> per project</dd>
+          </dl>
+        </div>
+
+        <div class="side-block side-block--accent">
+          <span class="side-kicker">Uninstall</span>
+          <p class="side-p">Remove the binary and you're done — nothing else is touched on disk. Package managers uninstall cleanly:</p>
+          <code class="side-code">brew uninstall fernsicht &nbsp;·&nbsp; scoop uninstall fernsicht</code>
+        </div>
+
+        <div class="side-block">
+          <span class="side-kicker">Verify a release</span>
+          <p class="side-p">Every binary is signed with <code>cosign</code> (Sigstore keyless). SBOM (CycloneDX) and SLSA v1.0 provenance attachments ship alongside every tag. Verify any artifact against the GitHub Actions identity — no long-lived keys, no user accounts.</p>
+          <code class="side-code">cosign verify-blob --certificate …</code>
+          <p class="side-p" style="margin-top: 10px;">See <a href="https://github.com/MuteJester/Fernsicht/blob/main/cli/RELEASE.md" target="_blank" rel="noopener">cli/RELEASE.md</a> for the full verification recipe.</p>
+        </div>
+      </aside>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ NEXT STEPS ═════════ -->
+<section class="support">
+  <div class="shell">
+    <span class="support-frame">Ready</span>
+    <h2>Wrap your first task. <em>The link is in your terminal.</em></h2>
+    <p>Your very first <code class="inline-code">fernsicht run --</code> prints a URL like <code class="inline-code">https://app.fernsicht.space/#room=…&amp;role=viewer</code>. Open it on any device to watch live — no install, no account, peer-to-peer after the handshake. Share it with teammates who want to follow along.</p>
+    <div class="support-actions">
+      <a class="btn btn--primary" href="https://github.com/MuteJester/Fernsicht" target="_blank" rel="noopener">
+        View source on GitHub
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3 h6 v6 M3 9 l6 -6" stroke-linecap="round"/></svg>
+      </a>
+      <a class="btn" href="/">
+        Back to overview
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ FOOTER ═════════ -->
+<footer class="shell foot">
+  <div class="foot-left">
+    <span>© 2026 Fernsicht</span>
+    <a class="foot-link" href="https://github.com/MuteJester/Fernsicht" target="_blank" rel="noopener">Source</a>
+    <a class="foot-link" href="https://github.com/MuteJester/Fernsicht/tree/main/cli/docs" target="_blank" rel="noopener">Docs</a>
+    <a class="foot-link" href="https://github.com/MuteJester/Fernsicht/releases" target="_blank" rel="noopener">Releases</a>
+  </div>
+  <div class="foot-right">
+    <span>AGPL-3.0 / commercial</span>
+    <span class="dot"></span>
+    <span>no telemetry</span>
+  </div>
+</footer>
+
+<script>
+/* ── Runtime tabs ─────────────────────────────────────────────── */
+(function(){
+  const tabs  = document.querySelectorAll('.runtime-tab');
+  const panes = document.querySelectorAll('.runtime-pane');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const t = tab.dataset.target;
+      tabs.forEach(x => x.classList.toggle('is-active', x === tab));
+      panes.forEach(p => { p.hidden = (p.dataset.target !== t); });
+      // persist
+      try { localStorage.setItem('fernsicht:runtime', t); } catch(e){}
+    });
+  });
+  // restore
+  try {
+    const saved = localStorage.getItem('fernsicht:runtime');
+    if (saved) {
+      const tab = document.querySelector('.runtime-tab[data-target="' + saved + '"]');
+      if (tab) tab.click();
+    }
+  } catch(e){}
+})();
+
+/* ── Copy buttons ─────────────────────────────────────────────── */
+(function(){
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const row  = btn.closest('.cmd');
+      const code = row && row.querySelector('[data-install]');
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code.textContent.trim());
+      } catch(e){
+        const r = document.createRange(); r.selectNodeContents(code);
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        try { document.execCommand('copy'); } catch(_){}
+        s.removeAllRanges();
+      }
+      const orig = btn.textContent;
+      btn.textContent = 'Copied';
+      btn.classList.add('copied');
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => {
+        btn.textContent = orig;
+        btn.classList.remove('copied');
+      }, 1400);
+    });
+  });
+})();
+</script>
+</body>
+</html>

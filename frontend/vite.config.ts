@@ -8,11 +8,38 @@ const SIGNALING_TARGET =
   process.env.VITE_DEV_SIGNALING_TARGET || "https://signal.fernsicht.space";
 
 export default defineConfig({
-  // GitHub Pages project sites are served from /<repo-name>/.
-  // Override with VITE_BASE_PATH in CI.
+  // GitHub Pages serves us at a custom apex (app.fernsicht.space via
+  // CNAME). Override with VITE_BASE_PATH only if we ever host under a
+  // path prefix.
   base: process.env.VITE_BASE_PATH || "/",
   build: {
     outDir: "dist",
+    rollupOptions: {
+      // Four-page build:
+      //   index.html   — marketing landing (new design).
+      //   install.html — install docs + platform picker.
+      //   viewer.html  — STATIC PREVIEW of the redesigned viewer
+      //                  UI (Phase 2 will wire this to real data
+      //                  and consolidate with app.html). Ships
+      //                  with "Demo preview" chrome and cycling
+      //                  fake data. NOT linked from top-nav —
+      //                  accessible only by direct URL until the
+      //                  full wire-up lands.
+      //   app.html     — the LIVE functional WebRTC viewer runtime
+      //                  (pre-redesign chrome; Phase 2 replaces).
+      //                  The landing's root URL detects
+      //                  `role=viewer` in the fragment and hands
+      //                  off here via an inline redirect, so CLI-
+      //                  printed URLs of the form
+      //                  `https://app.fernsicht.space/
+      //                  #room=<id>&role=viewer` still resolve.
+      input: {
+        main:    "./index.html",
+        install: "./install.html",
+        viewer:  "./viewer.html",
+        app:     "./app.html",
+      },
+    },
   },
   server: {
     proxy: {
