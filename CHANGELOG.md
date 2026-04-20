@@ -18,6 +18,17 @@ Landing in the next release.
 
 ---
 
+## [cli/v0.1.1] — 2026-04-20
+
+### Fixed
+
+- `install.ps1` parse errors on Windows PowerShell 5.1 — the installer
+  crashed on `[regex]::Escape(...)` and `[Environment]::...` embedded
+  in double-quoted strings before it could reach the download step.
+  PS 7 (pwsh) was always fine; stock Windows PowerShell now works too.
+
+---
+
 ## [cli/v0.1.0] — 2026-04-20
 
 First public release of the Fernsicht CLI. Wraps any command and
