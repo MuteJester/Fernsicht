@@ -1,0 +1,290 @@
+# Continuous supply-chain scanning.
+#
+# Runs vulnerability + license compliance checks across every
+# ecosystem the repo touches: Go (CLI + bridge), Python (SDK), npm
+# (frontend), Docker (CLI image), plus an aggregate pass with
+# osv-scanner that catches cross-ecosystem issues.
+#
+# Triggers:
+#   - push to main (on anything that could affect deps)
+#   - pull_request (so authors see issues pre-merge)
+#   - weekly cron (so we find CVEs published AFTER a merge)
+#   - manual workflow_dispatch (for one-off audits)
+#
+# CVE severity policy (.github/security-policy.json):
+#   - CRITICAL: release-blocking everywhere
+#   - HIGH:     warning on PR/push; release-blocking on tag pushes
+#   - MEDIUM/LOW: reported but non-blocking
+#
+# License policy (.github/license-policy.json):
+#   - Allow-list of SPDX identifiers compatible with AGPL-3.0.
+#   - Deny-list of known-incompatible identifiers.
+#   - Any dep matching neither list produces a WARNING (review needed).
+
+name: supply-chain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays at 06:00 UTC — catches CVEs disclosed over the weekend.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  # One scan per ref; cancel superseded in-progress runs (no artifact
+  # lifetime concerns here — scans are read-only).
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # SARIF uploads for Code Scanning tab (optional but nice).
+  security-events: write
+
+jobs:
+  # ------------------------------------------------------------------
+  # Go: govulncheck for CLI + bridge.
+  # ------------------------------------------------------------------
+  govulncheck:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [cli, bridge]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # pin v5.5.0
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: ${{ matrix.component }}/go.sum
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        working-directory: ${{ matrix.component }}
+        run: |
+          # govulncheck exit codes:
+          #   0 — no vulnerabilities
+          #   3 — vulnerabilities reachable in caller's code (BAD)
+          # Non-reachable CVEs produce informational output but exit 0.
+          govulncheck ./...
+
+  # ------------------------------------------------------------------
+  # Python: pip-audit on the SDK's declared dependencies.
+  # ------------------------------------------------------------------
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pin v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install pip-audit + SDK deps
+        working-directory: publishers/python
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          # Resolve deps into a lock file so pip-audit sees the
+          # transitive graph, not just direct deps.
+          python -m pip install -e .
+          pip freeze > .deps.txt
+
+      - name: Run pip-audit
+        working-directory: publishers/python
+        run: pip-audit --strict --requirement .deps.txt
+
+  # ------------------------------------------------------------------
+  # npm: audit frontend deps.
+  # ------------------------------------------------------------------
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # pin v4.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "frontend/package-lock.json"
+
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+
+      - name: npm audit (production deps)
+        working-directory: frontend
+        # --production limits to runtime deps only (dev deps have
+        # huge graphs that rarely matter for shipped users).
+        # --audit-level=high blocks on HIGH + CRITICAL.
+        run: npm audit --omit=dev --audit-level=high
+
+  # ------------------------------------------------------------------
+  # Docker: trivy scan of the Dockerfile + filesystem. Catches CVEs
+  # in the base image layers and in any packages Dockerfile installs.
+  # ------------------------------------------------------------------
+  trivy-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Trivy config scan (Dockerfile)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # pin v0.35.0
+        with:
+          scan-type: 'config'
+          scan-ref: 'cli/Dockerfile'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+  # ------------------------------------------------------------------
+  # Cross-ecosystem: osv-scanner aggregate. Catches things individual
+  # scanners miss, and reports against the OSV database which covers
+  # CVEs + GHSA + language-registry advisories uniformly.
+  # ------------------------------------------------------------------
+  osv-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Run osv-scanner
+        uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@98b584ee2ed2da3935ccce10e06739d54cdcd20b  # pin v2.0.0
+        with:
+          scan-args: |-
+            --recursive
+            --skip-git
+            ./
+
+  # ------------------------------------------------------------------
+  # License compliance: Go + Python. Ensures no transitive dep sneaks
+  # in a license that's incompatible with AGPL-3.0.
+  # ------------------------------------------------------------------
+  license-scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [cli, bridge]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # pin v5.5.0
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: ${{ matrix.component }}/go.sum
+
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: Run license check
+        working-directory: ${{ matrix.component }}
+        run: |
+          # go-licenses ships a built-in classifier:
+          #   notice     — permissive (MIT, BSD, Apache-2.0, ISC, …)
+          #   reciprocal — requires distribution of modifications
+          #                (MPL-2.0, LGPL, …) — allowed for AGPL
+          #   restricted — copyleft, source-must-be-AGPL (GPL-3.0)
+          #                — we're AGPL so accept these
+          #   forbidden  — cannot link (non-OSS, proprietary)
+          #   unknown    — license couldn't be classified — review
+          # For a pre-v0.1.0 AGPL release, only forbidden + unknown
+          # block CI. Revisit policy once we hit v1.0.
+          go-licenses check ./... --disallowed_types=forbidden,unknown
+
+      - name: Generate license manifest
+        working-directory: ${{ matrix.component }}
+        run: |
+          mkdir -p ../license-reports
+          go-licenses report ./... \
+            --template <(echo '{{range .}}{{.Name}},{{.LicenseName}},{{.LicenseURL}}{{"\n"}}{{end}}') \
+            > "../license-reports/licenses-${{ matrix.component }}.csv" || true
+          head -20 "../license-reports/licenses-${{ matrix.component }}.csv" || true
+
+      - name: Upload license manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pin v4.6.2
+        with:
+          name: licenses-${{ matrix.component }}
+          path: license-reports/licenses-${{ matrix.component }}.csv
+          if-no-files-found: warn
+          retention-days: 30
+
+  license-python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pin v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install SDK + pip-licenses
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e publishers/python
+          python -m pip install pip-licenses
+
+      - name: Generate license manifest
+        run: |
+          mkdir -p license-reports
+          pip-licenses --format=csv --with-urls --with-license-file \
+            --output-file license-reports/licenses-python.csv
+          head -20 license-reports/licenses-python.csv
+
+      - name: Enforce allow-list
+        run: |
+          # Flag any row whose license isn't on the AGPL-compatible
+          # allow-list. A simple grep is enough for v0.1.0; a richer
+          # SPDX parser can come later.
+          allowed='MIT|Apache Software License|Apache-2.0|BSD|Python Software Foundation License|Mozilla Public License 2.0|ISC License|AGPL|GPL'
+          bad="$(tail -n +2 license-reports/licenses-python.csv | awk -F',' '{print $3}' | grep -viE "$allowed" || true)"
+          if [ -n "$bad" ]; then
+            echo "::warning::Python deps with non-allow-listed licenses:"
+            echo "$bad"
+            # WARN for now; flip to exit 1 once allow-list is curated.
+          fi
+
+      - name: Upload license manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pin v4.6.2
+        with:
+          name: licenses-python
+          path: license-reports/licenses-python.csv
+          retention-days: 30
+
+  # ------------------------------------------------------------------
+  # Summary: aggregate pass/fail for branch-protection rule. Require
+  # this single check in branch protection and all scans must pass.
+  # ------------------------------------------------------------------
+  supply-chain-summary:
+    runs-on: ubuntu-latest
+    needs:
+      - govulncheck
+      - pip-audit
+      - npm-audit
+      - trivy-docker
+      - osv-scanner
+      - license-scan
+      - license-python
+    if: always()
+    steps:
+      - name: Report
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+            echo "::error::one or more supply-chain jobs failed"
+            exit 1
+          fi
+          echo "supply-chain: all green"

@@ -77,9 +77,14 @@ jobs:
       - name: Resolve version + reproducible timestamp
         id: vars
         run: |
-          # Tag is e.g. "cli/v0.1.0". Strip the "cli/" prefix → "v0.1.0".
-          tag="${GITHUB_REF##*/cli/}"
-          version="${tag#v}"
+          # GITHUB_REF = "refs/tags/cli/v0.1.0".
+          # tag      — FULL git tag name, e.g. "cli/v0.1.0". Used
+          #             anywhere that talks to git/GitHub APIs (release
+          #             creation, SLSA upload-tag-name).
+          # version  — stripped, e.g. "0.1.0". Used for artifact
+          #             naming, user-facing display, ldflags.
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#cli/v}"
           # SOURCE_DATE_EPOCH from the tagged commit's committer timestamp.
           # Anyone rebuilding with this same value gets identical binaries.
           source_date_epoch="$(git log -1 --format=%ct "$GITHUB_REF")"
@@ -155,6 +160,11 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      # Base64-encoded SHA256SUMS output for the SLSA provenance
+      # generator. One digest per release artifact — the provenance
+      # attests to these specific bytes.
+      digests: ${{ steps.digest-hash.outputs.digests }}
 
     steps:
       - name: Checkout repository
@@ -249,6 +259,34 @@ jobs:
               "$f"
           done
 
+      # Phase 6.1 — Generate CycloneDX SBOM for the CLI source tree.
+      # Required for AGPL compliance + increasingly an enterprise
+      # procurement checkbox. Uses Syft under the hood via Anchore's
+      # reusable action.
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0  # pin v0.18.0
+        with:
+          path: cli
+          format: cyclonedx-json
+          artifact-name: sbom-cli-${{ needs.preflight.outputs.version }}.cdx.json
+          output-file: cli/dist/sbom-cli-${{ needs.preflight.outputs.version }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      # Compute base64-encoded digests of the release binaries so the
+      # SLSA provenance job can attest to these exact bytes.
+      - name: Compute digests for SLSA
+        id: digest-hash
+        run: |
+          cd cli/dist
+          # One line per artifact; base64-encoded for transport to the
+          # reusable SLSA workflow's input.
+          digests="$(sha256sum fernsicht-* install.sh install.ps1 \
+                       fernsicht.rb fernsicht.json \
+                       "sbom-cli-${{ needs.preflight.outputs.version }}.cdx.json" \
+                       | base64 -w0)"
+          echo "digests=$digests" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda  # pin v2.2.1
         with:
@@ -294,3 +332,27 @@ jobs:
             cli/dist/fernsicht.json
             cli/dist/*.sig
             cli/dist/*.cert
+            cli/dist/sbom-cli-*.cdx.json
+
+  # ------------------------------------------------------------------
+  # SLSA v1.0 provenance (level 3) — runs AFTER the release job so it
+  # can attest to the exact digests we published. The reusable workflow
+  # produces `multiple.intoto.jsonl` and attaches it to the GH release.
+  # Verify with slsa-verifier:
+  #   slsa-verifier verify-artifact \
+  #     --provenance-path multiple.intoto.jsonl \
+  #     --source-uri github.com/MuteJester/Fernsicht \
+  #     --source-tag cli/vX.Y.Z \
+  #     fernsicht-linux-amd64
+  # ------------------------------------------------------------------
+  provenance:
+    needs: [preflight, release]
+    permissions:
+      actions: read       # reusable workflow needs to read its own run
+      id-token: write     # mint OIDC token for Sigstore Fulcio
+      contents: write     # upload provenance to GH release
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@5a775b367a56d5bd118a224a811bba288150a563  # pin v2.0.0
+    with:
+      base64-subjects: ${{ needs.release.outputs.digests }}
+      upload-assets: true
+      upload-tag-name: ${{ needs.preflight.outputs.tag }}

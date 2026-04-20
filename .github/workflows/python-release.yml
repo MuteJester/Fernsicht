@@ -44,6 +44,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       version: ${{ steps.vars.outputs.version }}
+      tag: ${{ steps.vars.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
@@ -51,11 +52,13 @@ jobs:
       - name: Resolve version from tag
         id: vars
         run: |
-          # Tag is e.g. "py/v0.1.0" → "0.1.0". PyPI accepts PEP 440
-          # versions (incl. pre-releases like "0.1.0rc1"); the Python
-          # SDK's pyproject.toml must match whatever the tag says.
-          tag="${GITHUB_REF##*/py/}"
-          version="${tag#v}"
+          # GITHUB_REF = "refs/tags/py/v0.1.0".
+          # tag      — FULL git tag ("py/v0.1.0"), for SLSA upload-tag-name.
+          # version  — stripped ("0.1.0"), for PyPI + pyproject.toml match.
+          # PyPI accepts PEP 440 versions (incl. pre-releases like
+          # "0.1.0rc1"); pyproject.toml's `version = "..."` must match.
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#py/v}"
           echo "tag=$tag"         >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
@@ -91,6 +94,8 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      digests: ${{ steps.digest-hash.outputs.digests }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
@@ -118,6 +123,33 @@ jobs:
           /tmp/wheelcheck/bin/python -m pip install dist/fernsicht-*.whl
           /tmp/wheelcheck/bin/python -c "from fernsicht import blick, manual; print('import OK')"
 
+      # Phase 6.1 — CycloneDX SBOM for the Python SDK. Scans the
+      # source tree so pyproject.toml + its resolved deps are in the
+      # bill of materials. Written to a SEPARATE directory from
+      # `dist/` because pypa/gh-action-pypi-publish uploads the whole
+      # contents of `packages-dir`; the SBOM is release metadata, not
+      # a PyPI distribution file.
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0  # pin v0.18.0
+        with:
+          path: publishers/python
+          format: cyclonedx-json
+          artifact-name: sbom-python-${{ needs.preflight.outputs.version }}.cdx.json
+          output-file: publishers/python/sbom/sbom-python-${{ needs.preflight.outputs.version }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      # Digest-hashes for SLSA provenance. The SLSA reusable workflow
+      # wants base64-encoded `sha256sum` output.
+      - name: Compute digests for SLSA
+        id: digest-hash
+        working-directory: publishers/python
+        run: |
+          digests="$( \
+            (cd dist && sha256sum fernsicht-*.whl fernsicht-*.tar.gz) \
+            | base64 -w0)"
+          echo "digests=$digests" >> "$GITHUB_OUTPUT"
+
       - name: Upload dist as artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pin v4.6.2
         with:
@@ -125,6 +157,14 @@ jobs:
           path: publishers/python/dist/
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pin v4.6.2
+        with:
+          name: python-sbom
+          path: publishers/python/sbom/
+          if-no-files-found: error
+          retention-days: 30
 
   # ------------------------------------------------------------------
   # Publish — OIDC-authenticated upload to PyPI. Runs ONLY on a green
@@ -134,6 +174,10 @@ jobs:
     needs: [preflight, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Write permission for the GH release step (SBOM + SLSA target).
+    permissions:
+      contents: write
+      id-token: write   # PyPI OIDC trusted publisher
     # The environment name is purely informational for the audit log
     # + any required approval gate. Matches the "(any)" env selector
     # in the PyPI trusted-publisher config.
@@ -147,13 +191,77 @@ jobs:
           name: python-dist
           path: dist/
 
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # pin v4.3.0
+        with:
+          name: python-sbom
+          path: sbom/
+
       - name: Publish to PyPI
         # No `password` / `user` / `api-token` — the action mints an
         # OIDC token from the id-token: write permission and exchanges
         # it with PyPI for a short-lived upload token.
         uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc  # pin v1.12.4
         with:
+          # Only distribution files (wheel + sdist) live in dist/. The
+          # SBOM is in a separate sbom/ dir so it doesn't get uploaded
+          # to PyPI (PyPI rejects non-distribution files).
           packages-dir: dist/
+          skip-existing: false
           # `print-hash: true` prints SHA256 of each uploaded file so
           # we have a record in logs matching what PyPI shows.
           print-hash: true
+
+      # Create a GH release for the Python SDK so the SBOM + SLSA
+      # provenance have a stable home outside PyPI (PyPI doesn't yet
+      # host attestations — PEP 740 is work-in-progress). Security-
+      # conscious users download + verify from here.
+      - name: Create GitHub release for attestations
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda  # pin v2.2.1
+        with:
+          tag_name: py/v${{ needs.preflight.outputs.version }}
+          name: fernsicht Python ${{ needs.preflight.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(needs.preflight.outputs.version, '-') }}
+          generate_release_notes: true
+          body: |
+            # fernsicht Python ${{ needs.preflight.outputs.version }}
+
+            **Primary install channel: PyPI.**
+
+            ```bash
+            pip install fernsicht==${{ needs.preflight.outputs.version }}
+            ```
+
+            This GitHub Release hosts attestations (SBOM + SLSA v1.0
+            provenance) for the PyPI-published artifacts. Nothing to
+            download unless you're doing supply-chain verification.
+
+            ## Verify provenance
+
+            ```bash
+            slsa-verifier verify-artifact \
+              --provenance-path multiple.intoto.jsonl \
+              --source-uri github.com/${{ github.repository }} \
+              --source-tag py/v${{ needs.preflight.outputs.version }} \
+              fernsicht-${{ needs.preflight.outputs.version }}-py3-none-any.whl
+            ```
+          files: |
+            sbom/sbom-python-*.cdx.json
+
+  # ------------------------------------------------------------------
+  # SLSA v1.0 provenance for the Python SDK artifacts. Attached to a
+  # GH release (not PyPI — PyPI doesn't accept attestations yet as of
+  # the time of writing; they're working on it via PEP 740).
+  # ------------------------------------------------------------------
+  provenance:
+    needs: [preflight, build, publish]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@5a775b367a56d5bd118a224a811bba288150a563  # pin v2.0.0
+    with:
+      base64-subjects: ${{ needs.build.outputs.digests }}
+      upload-assets: true
+      upload-tag-name: ${{ needs.preflight.outputs.tag }}
