@@ -12,6 +12,10 @@
 #   cosign verify ghcr.io/<owner>/fernsicht:latest \
 #     --certificate-identity-regexp 'https://github.com/MuteJester/Fernsicht/.+' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#
+# Phase 0 (safety rails) applied: concurrency group, SHA-pinned
+# actions, preflight (tests on tag commit) before publish.
+# See .private/RELEASE_PIPELINE_PLAN.md §Phase 0.
 
 name: cli-docker
 
@@ -20,19 +24,56 @@ on:
     tags:
       - 'cli/v*'
 
+# Queue concurrent tag pushes — Docker Hub / GHCR pushes aren't safe
+# to abort mid-run, so we wait rather than cancel.
+concurrency:
+  group: release-docker-${{ github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write   # push to ghcr.io
   id-token: write   # cosign keyless signing
 
 jobs:
+  # ------------------------------------------------------------------
+  # Preflight — gate the image push on green tests. Independent of
+  # cli-release.yml's preflight so this workflow is self-contained.
+  # ------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # pin v5.5.0
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: |
+            cli/go.sum
+            bridge/go.sum
+
+      - name: Bridge tests
+        working-directory: bridge
+        run: go test -race -timeout 120s ./...
+
+      - name: CLI tests
+        working-directory: cli
+        run: go test -race -timeout 120s ./...
+
   publish:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
         with:
           fetch-depth: 0
 
@@ -59,13 +100,13 @@ jobs:
       - name: Set up QEMU
         # Needed for cross-arch (linux/arm64) builds on the
         # ubuntu-latest amd64 runner.
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf  # pin v3.2.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349  # pin v3.7.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  # pin v3.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -90,7 +131,7 @@ jobs:
 
       - name: Build + push (multi-arch)
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355  # pin v6.10.0
         with:
           context: .
           file: cli/Dockerfile
@@ -106,7 +147,7 @@ jobs:
             SOURCE_DATE_EPOCH=${{ steps.vars.outputs.source_date_epoch }}
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da  # pin v3.7.0
         with:
           cosign-release: 'v2.5.0'
 

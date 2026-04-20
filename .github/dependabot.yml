@@ -1,0 +1,96 @@
+# Dependabot configuration.
+#
+# Primary purpose: keep our SHA-pinned GitHub Actions up to date.
+# We pin actions to full commit SHAs (per release-pipeline plan
+# Phase 0.4) for supply-chain safety — tags are mutable, SHAs are
+# not. Dependabot watches each pinned action, notices when a new
+# release moves its tag forward, and opens a PR bumping the SHA.
+# A human reviews the diff (GitHub Actions Dependabot PRs include a
+# "Compare changes" link) and merges.
+#
+# Go modules and Python dependencies are tracked too so we don't
+# ship known-vulnerable deps. Weekly cadence keeps PR noise down.
+
+version: 2
+updates:
+  # GitHub Actions — the critical one for supply-chain hygiene.
+  - package-ecosystem: "github-actions"
+    directory: "/"                      # scans .github/workflows/
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(actions)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Go modules — CLI + bridge.
+  - package-ecosystem: "gomod"
+    directory: "/cli"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(cli/deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "go"
+  - package-ecosystem: "gomod"
+    directory: "/bridge"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(bridge/deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "go"
+
+  # Python — SDK.
+  - package-ecosystem: "pip"
+    directory: "/publishers/python"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(py/deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "python"
+
+  # npm — frontend viewer.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(frontend/deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "javascript"
+
+  # Docker — base image of cli/Dockerfile.
+  - package-ecosystem: "docker"
+    directory: "/cli"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(cli/docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
