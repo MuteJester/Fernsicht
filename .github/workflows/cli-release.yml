@@ -468,7 +468,7 @@ jobs:
       actions: read       # reusable workflow needs to read its own run
       id-token: write     # mint OIDC token for Sigstore Fulcio
       contents: write     # upload provenance to GH release
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@5a775b367a56d5bd118a224a811bba288150a563  # pin v2.0.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a  # pin v2.1.0
     with:
       base64-subjects: ${{ needs.release.outputs.digests }}
       upload-assets: true
