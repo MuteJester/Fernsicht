@@ -1,0 +1,178 @@
+# Build, sign, and publish a fernsicht-bridge release.
+#
+# Triggered by pushing a tag matching `bridge/v*` (e.g., `bridge/v0.1.0`).
+# Steps mirror cli-release.yml one-for-one so the bridge and CLI
+# release stories are identical from the user's perspective.
+#
+# The R SDK downloads these binaries lazily on first use:
+#   https://github.com/MuteJester/Fernsicht/releases/download/bridge/v<VER>/fernsicht-bridge-<os>-<arch><ext>
+# (see publishers/r/R/binary.R). Do NOT change the asset filenames
+# without a coordinated SDK update.
+#
+# The CLI links the bridge in-process via bridge/pkg/embed, so it
+# does NOT need these binaries. This workflow exists purely for SDKs
+# (R today; future Julia/Ruby/Matlab if we pick Option B forever).
+#
+# Phase 0 safety rails applied: concurrency group, preflight (tests
+# on tag commit), SHA-pinned actions, reproducible-build verify,
+# cosign keyless signing.
+
+name: bridge-release
+
+on:
+  push:
+    tags:
+      - 'bridge/v*'
+
+concurrency:
+  group: release-bridge-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  # OIDC token for cosign keyless signing.
+  id-token: write
+  # Create / update the GitHub release.
+  contents: write
+
+jobs:
+  # ------------------------------------------------------------------
+  # Preflight — gate the release on green tests + repro build.
+  # ------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      tag: ${{ steps.vars.outputs.tag }}
+      source_date_epoch: ${{ steps.vars.outputs.source_date_epoch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # pin v5.5.0
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: bridge/go.sum
+
+      - name: Resolve version + reproducible timestamp
+        id: vars
+        run: |
+          # Tag is e.g. "bridge/v0.1.0". Strip the "bridge/" prefix → "v0.1.0".
+          tag="${GITHUB_REF##*/bridge/}"
+          version="${tag#v}"
+          # SOURCE_DATE_EPOCH from the tagged commit's committer timestamp.
+          source_date_epoch="$(git log -1 --format=%ct "$GITHUB_REF")"
+          echo "version=$version"                     >> "$GITHUB_OUTPUT"
+          echo "source_date_epoch=$source_date_epoch" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"                             >> "$GITHUB_OUTPUT"
+
+      - name: Bridge tests
+        working-directory: bridge
+        run: go test -race -timeout 180s ./...
+
+      - name: Verify reproducible build
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+          SOURCE_DATE_EPOCH: ${{ steps.vars.outputs.source_date_epoch }}
+        run: make -C bridge verify-repro
+
+  # ------------------------------------------------------------------
+  # Release — build + sign + publish. Only runs after preflight green.
+  # ------------------------------------------------------------------
+  release:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # pin v5.5.0
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: bridge/go.sum
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da  # pin v3.7.0
+        with:
+          cosign-release: 'v2.5.0'
+
+      - name: Cross-compile + SHA256SUMS
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SOURCE_DATE_EPOCH: ${{ needs.preflight.outputs.source_date_epoch }}
+        run: make -C bridge dist
+
+      - name: Sign artifacts (cosign keyless)
+        env:
+          COSIGN_YES: 'true'
+        run: |
+          cd bridge/dist
+          for f in fernsicht-bridge-* SHA256SUMS; do
+            cosign sign-blob \
+              --output-signature "$f.sig" \
+              --output-certificate "$f.cert" \
+              "$f"
+          done
+          ls -la
+
+      - name: Verify signatures (sanity)
+        run: |
+          cd bridge/dist
+          for f in fernsicht-bridge-* SHA256SUMS; do
+            cosign verify-blob \
+              --certificate "$f.cert" \
+              --signature  "$f.sig" \
+              --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$f"
+          done
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda  # pin v2.2.1
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          name: fernsicht-bridge ${{ needs.preflight.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(needs.preflight.outputs.version, '-') }}
+          generate_release_notes: true
+          body: |
+            # fernsicht-bridge ${{ needs.preflight.outputs.version }}
+
+            The `fernsicht-bridge` binary powers language SDKs that don't
+            link Go directly (notably the R SDK). End users rarely
+            download this directly — the SDK grabs the matching binary
+            for your platform automatically on first use.
+
+            ## Manual download + verification
+
+            ```bash
+            # Download the binary for your platform:
+            curl -fsSL -o fernsicht-bridge \
+              https://github.com/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.tag }}/fernsicht-bridge-linux-amd64
+
+            # Verify the cosign keyless signature:
+            cosign verify-blob \
+              --certificate fernsicht-bridge-linux-amd64.cert \
+              --signature   fernsicht-bridge-linux-amd64.sig \
+              --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
+              --certificate-oidc-issuer     https://token.actions.githubusercontent.com \
+              fernsicht-bridge-linux-amd64
+            ```
+
+            See `bridge/RELEASE.md` for full reproducibility +
+            verification instructions.
+          files: |
+            bridge/dist/fernsicht-bridge-*
+            bridge/dist/SHA256SUMS
+            bridge/dist/*.sig
+            bridge/dist/*.cert

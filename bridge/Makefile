@@ -18,10 +18,19 @@ BIN_NAME  := fernsicht-bridge
 DIST      := dist
 
 GO        := go
-GOFLAGS   := -trimpath
-LDFLAGS   := -s -w -X main.version=$(VERSION)
 
-# Cross-build matrix (see plan §11).
+# Reproducible-build flags (mirrors cli/Makefile):
+#   -trimpath         remove filesystem paths from binary
+#   -buildvcs=false   don't embed git-state info (varies across checkouts)
+#   -s -w             strip symbol table + DWARF debug info
+#   -buildid=         clear build ID so repeated builds produce identical SHAs
+# SOURCE_DATE_EPOCH support is purely vestigial here (bridge has no
+# BUILD_DATE var to inject), but honouring the env var keeps parity
+# with the CLI's release pipeline story.
+GOFLAGS   := -trimpath -buildvcs=false
+LDFLAGS   := -s -w -buildid= -X main.version=$(VERSION)
+
+# Cross-build matrix.
 PLATFORMS := \
 	linux/amd64 \
 	linux/arm64 \
@@ -29,7 +38,7 @@ PLATFORMS := \
 	darwin/arm64 \
 	windows/amd64
 
-.PHONY: all build test vet clean release tidy verify-cgo help
+.PHONY: all build test vet clean release dist sha256sums verify-repro tidy verify-cgo help
 
 all: build
 
@@ -80,7 +89,14 @@ verify-cgo: build
 		exit 1; \
 	fi
 
-release: clean $(DIST)
+## release / dist — cross-build all five platforms + SHA256SUMS. Both
+## names exist for backward compat; `dist` matches the CLI Makefile
+## and is what the release workflow invokes.
+release: dist
+dist: cross-compile sha256sums
+
+cross-compile:
+	@mkdir -p $(DIST)
 	@echo "==> cross-building $(BIN_NAME) $(VERSION) for $(words $(PLATFORMS)) platforms"
 	@$(foreach P,$(PLATFORMS), \
 		GOOS=$(firstword $(subst /, ,$(P))) \
@@ -90,9 +106,31 @@ release: clean $(DIST)
 			$(PKG) && \
 		echo "    built $(DIST)/$(BIN_NAME)-$(subst /,-,$(P))$(if $(findstring windows,$(P)),.exe,)" ; \
 	)
-	@echo "==> generating SHA256 sums"
-	@cd $(DIST) && sha256sum $(BIN_NAME)-* > SHA256SUMS
+
+sha256sums:
+	@cd $(DIST) && \
+		(command -v sha256sum >/dev/null && sha256sum $(BIN_NAME)-* > SHA256SUMS) || \
+		(command -v shasum >/dev/null && shasum -a 256 $(BIN_NAME)-* > SHA256SUMS) || \
+		(echo "no sha256 tool found"; exit 1)
 	@cat $(DIST)/SHA256SUMS
 
-$(DIST):
-	@mkdir -p $(DIST)
+## verify-repro — build twice with the same SOURCE_DATE_EPOCH and
+## confirm SHA256s match. The release pipeline runs this; humans can
+## run it locally to validate reproducibility before a release.
+verify-repro:
+	@: $${SOURCE_DATE_EPOCH:?must be set, e.g.: SOURCE_DATE_EPOCH=1700000000 make verify-repro}
+	@rm -rf $(DIST)
+	@$(MAKE) cross-compile >/dev/null 2>&1
+	@$(MAKE) sha256sums >/dev/null
+	@cp $(DIST)/SHA256SUMS $(DIST)/SHA256SUMS.first
+	@rm -f $(DIST)/$(BIN_NAME)-*
+	@$(MAKE) cross-compile >/dev/null 2>&1
+	@$(MAKE) sha256sums >/dev/null
+	@if diff -q $(DIST)/SHA256SUMS.first $(DIST)/SHA256SUMS >/dev/null; then \
+		echo "PASS — both builds produced identical SHA256SUMS:"; \
+		cat $(DIST)/SHA256SUMS; \
+	else \
+		echo "FAIL — SHA256SUMS differ between two builds:"; \
+		diff $(DIST)/SHA256SUMS.first $(DIST)/SHA256SUMS; \
+		exit 1; \
+	fi

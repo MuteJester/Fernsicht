@@ -1,15 +1,23 @@
-# Build and publish the fernsicht CLI Docker image to GitHub Container
-# Registry on every CLI release tag.
+# Build and publish the fernsicht CLI Docker image to GitHub
+# Container Registry (primary) AND Docker Hub (mirror) on every CLI
+# release tag.
 #
-# Image tags published:
-#   ghcr.io/<owner>/fernsicht:latest          (only when pushing a stable tag)
-#   ghcr.io/<owner>/fernsicht:v<MAJOR>        (e.g. v0)
-#   ghcr.io/<owner>/fernsicht:v<MAJOR>.<MIN>  (e.g. v0.1)
-#   ghcr.io/<owner>/fernsicht:v<MAJOR>.<MIN>.<PATCH>
+# Image tags published to BOTH registries:
+#   <reg>/<owner>/fernsicht:latest          (only when pushing a stable tag)
+#   <reg>/<owner>/fernsicht:v<MAJOR>        (e.g. v0)
+#   <reg>/<owner>/fernsicht:v<MAJOR>.<MIN>  (e.g. v0.1)
+#   <reg>/<owner>/fernsicht:v<MAJOR>.<MIN>.<PATCH>
 #
-# All tags are signed with cosign keyless (matching the binary release
-# pipeline). Verify with:
-#   cosign verify ghcr.io/<owner>/fernsicht:latest \
+# Primary:  ghcr.io/<owner>/fernsicht
+# Mirror:   docker.io/<dockerhub-user>/fernsicht
+#
+# Why two registries: GHCR is the authoritative source (no pull rate
+# limit from GH runners); Docker Hub is a convenience mirror because
+# many users reach for `docker pull` with no registry prefix by habit.
+# Advertise GHCR as primary in docs.
+#
+# All tags in BOTH registries are signed with cosign keyless. Verify:
+#   cosign verify <registry>/<owner>/fernsicht:latest \
 #     --certificate-identity-regexp 'https://github.com/MuteJester/Fernsicht/.+' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 #
@@ -79,6 +87,8 @@ jobs:
 
       - name: Resolve version + reproducible timestamp
         id: vars
+        env:
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           tag="${GITHUB_REF##*/cli/}"           # "v0.1.0"
           version="${tag#v}"                     # "0.1.0"
@@ -94,7 +104,16 @@ jobs:
             echo "build_date=$build_date"
             echo "source_date_epoch=$source_date_epoch"
             echo "owner=$owner"
-            echo "image=ghcr.io/${owner}/fernsicht"
+            echo "ghcr_image=ghcr.io/${owner}/fernsicht"
+            # Docker Hub mirror — only populated if DOCKERHUB_USERNAME
+            # secret is set. Empty string → downstream steps skip the
+            # mirror push. This keeps the workflow functional even in
+            # forks where the user hasn't configured Docker Hub.
+            if [ -n "$DOCKERHUB_USER" ]; then
+              echo "dockerhub_image=docker.io/${DOCKERHUB_USER}/fernsicht"
+            else
+              echo "dockerhub_image="
+            fi
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
@@ -112,20 +131,46 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        # Conditional — skip if secret not set (forks, self-hosted).
+        if: steps.vars.outputs.dockerhub_image != ''
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  # pin v3.3.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Compute Docker tags
         id: tags
         run: |
           v="${{ steps.vars.outputs.version }}"
-          image="${{ steps.vars.outputs.image }}"
-          # Skip "latest" + short tags for pre-releases (anything with
-          # a hyphen, e.g. v0.1.0-rc1).
-          if [[ "$v" == *-* ]]; then
-            tags="$image:v$v"
-          else
-            major="${v%%.*}"
-            minor="${v%.*}"
-            tags="$image:v$v,$image:v$minor,$image:v$major,$image:latest"
-          fi
+          ghcr="${{ steps.vars.outputs.ghcr_image }}"
+          hub="${{ steps.vars.outputs.dockerhub_image }}"
+
+          # Build the tag set for ONE image (registry+repo) at a
+          # given version. Stable releases get latest + v<MAJOR> +
+          # v<MAJOR>.<MIN> aliases; pre-releases (v*-rc* etc.) get
+          # only the full version — they must NEVER overwrite
+          # `:latest` or a floating major/minor tag.
+          emit_tags() {
+            local img="$1"
+            if [[ "$v" == *-* ]]; then
+              echo "$img:v$v"
+            else
+              major="${v%%.*}"
+              minor="${v%.*}"
+              echo "$img:v$v"
+              echo "$img:v$minor"
+              echo "$img:v$major"
+              echo "$img:latest"
+            fi
+          }
+
+          {
+            emit_tags "$ghcr"
+            [ -n "$hub" ] && emit_tags "$hub"
+          } | paste -sd, - > .tags.txt
+          tags="$(cat .tags.txt)"
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "Tags: $tags"
 

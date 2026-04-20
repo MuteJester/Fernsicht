@@ -1,0 +1,161 @@
+# Open PRs to the Homebrew tap + Scoop bucket after a successful CLI
+# release.
+#
+# Trigger: `workflow_run` on the `cli-release` workflow's completion.
+# Only runs if that workflow succeeded AND was triggered by a stable
+# (non-prerelease) `cli/v*` tag. Pre-releases must NOT land in the
+# stable tap channels — anyone running `brew install …/fernsicht`
+# or `scoop install fernsicht` would silently get the RC.
+#
+# Auth: mints a short-lived (~1 hour) installation token for the
+# Fernsicht Release Bot GitHub App. Token is scoped to the tap repos
+# only — it CANNOT write to the main Fernsicht repo even if the
+# workflow is compromised. See .private/RELEASE_PIPELINE_PLAN.md
+# §Phase 4 for the threat-model rationale (vs. a long-lived PAT).
+
+name: brew-scoop-pr
+
+on:
+  workflow_run:
+    workflows: ["cli-release"]
+    types: [completed]
+
+# One tap-PR run per CLI release tag. The tag can be read off the
+# upstream workflow run — `head_branch` is the git ref for a tag push.
+concurrency:
+  group: tap-autopr-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+permissions:
+  # Read-only on main repo (we download release assets). All writes
+  # happen against the tap repos via the GH App installation token.
+  contents: read
+  # gh CLI in download step uses github.token.
+  actions: read
+
+jobs:
+  # Parallel PRs: one per tap. Matrix keeps the logic DRY — the only
+  # per-tap differences are repo name, asset filename, and destination
+  # path within the tap repo.
+  tap-pr:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'cli/v') &&
+      !contains(github.event.workflow_run.head_branch, '-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # Don't fail the whole workflow if one tap PR fails — maintainer
+      # can open the other manually.
+      fail-fast: false
+      matrix:
+        tap:
+          - name: homebrew
+            repo: homebrew-fernsicht
+            file: fernsicht.rb
+            dest: Formula/fernsicht.rb
+          - name: scoop
+            repo: scoop-fernsicht
+            file: fernsicht.json
+            dest: fernsicht.json
+
+    steps:
+      - name: Resolve release context
+        id: vars
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          # head_branch is e.g. "cli/v0.1.0" for a tag push.
+          tag="$HEAD_BRANCH"
+          version="${tag#cli/v}"
+          echo "tag=$tag"            >> "$GITHUB_OUTPUT"
+          echo "version=$version"    >> "$GITHUB_OUTPUT"
+          echo "upstream_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/$UPSTREAM_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      # Mint a short-lived installation token scoped to this tap only.
+      # Secrets:
+      #   RELEASE_APP_ID         — public app identifier
+      #   RELEASE_APP_PRIVATE_KEY — .pem file contents (full, incl.
+      #                              BEGIN/END markers)
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42  # pin v2.1.4
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.tap.repo }}
+
+      # Download the rendered manifest from the GH Release that the
+      # upstream cli-release workflow just published.
+      - name: Download release manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          FILE: ${{ matrix.tap.file }}
+        run: |
+          mkdir -p assets
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            --dir assets \
+            --pattern "$FILE"
+          ls -la assets/
+
+      # Fetch the tap repo using the installation token. Clone depth
+      # is full because peter-evans/create-pull-request refuses to
+      # operate on shallow clones.
+      - name: Checkout tap repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+        with:
+          repository: ${{ github.repository_owner }}/${{ matrix.tap.repo }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: tap
+          fetch-depth: 0
+
+      - name: Update manifest in tap repo
+        env:
+          FILE: ${{ matrix.tap.file }}
+          DEST: ${{ matrix.tap.dest }}
+        run: |
+          mkdir -p "tap/$(dirname "$DEST")"
+          cp "assets/$FILE" "tap/$DEST"
+          echo "--- new $DEST ---"
+          cat "tap/$DEST"
+
+      - name: Open PR
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e  # pin v7.0.8
+        with:
+          path: tap
+          token: ${{ steps.app-token.outputs.token }}
+          branch: release/v${{ steps.vars.outputs.version }}
+          delete-branch: true
+          title: "fernsicht v${{ steps.vars.outputs.version }}"
+          # Commit message matches the title so `git log` on the tap
+          # repo reads sensibly.
+          commit-message: "fernsicht v${{ steps.vars.outputs.version }}"
+          committer: "Fernsicht Release Bot <release-bot@users.noreply.github.com>"
+          author: "Fernsicht Release Bot <release-bot@users.noreply.github.com>"
+          body: |
+            Automated release bump for **fernsicht v${{ steps.vars.outputs.version }}**.
+
+            Rendered by the [cli-release workflow](${{ steps.vars.outputs.upstream_url }})
+            in [`${{ github.repository }}`](${{ github.server_url }}/${{ github.repository }}).
+
+            ## Verifying the artifacts
+
+            The binaries referenced by this manifest are cosign-signed
+            via GitHub OIDC + Sigstore. Verify with:
+
+            ```bash
+            cosign verify-blob \
+              --certificate fernsicht-linux-amd64.cert \
+              --signature   fernsicht-linux-amd64.sig \
+              --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
+              --certificate-oidc-issuer     https://token.actions.githubusercontent.com \
+              fernsicht-linux-amd64
+            ```
+
+            A maintainer may merge this PR after a drive-by review —
+            nothing needs local testing; the bundled SHA256s already
+            match the signed release artifacts.

@@ -1,0 +1,159 @@
+# Publish the Fernsicht Python SDK to PyPI.
+#
+# Trigger: push of a tag matching `py/v*` (e.g., `py/v0.1.0`).
+# The tag version MUST match the `version = "…"` line in
+# publishers/python/pyproject.toml (the preflight job asserts this
+# before anything else runs).
+#
+# Authentication: PyPI OIDC "trusted publisher" — no long-lived
+# API token. The pending publisher config on pypi.org lists:
+#   Owner:      MuteJester
+#   Repository: Fernsicht
+#   Workflow:   python-release.yml    (this file's basename)
+#   Environment: (any)
+# Match those EXACTLY or PyPI refuses the token mint.
+#
+# Phase 0 safety rails applied: concurrency, preflight (tests +
+# version assert), SHA-pinned actions.
+
+name: python-release
+
+on:
+  push:
+    tags:
+      - 'py/v*'
+
+concurrency:
+  # One publish per tag at a time. PyPI is immutable, so double-
+  # publishing would just produce a hard error on the second run;
+  # still, queue rather than cancel to preserve audit-log clarity.
+  group: release-python-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Required for PyPI OIDC trusted-publisher token mint.
+  id-token: write
+
+jobs:
+  # ------------------------------------------------------------------
+  # Preflight — tests + tag↔manifest version assertion. Cheap gate.
+  # ------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Resolve version from tag
+        id: vars
+        run: |
+          # Tag is e.g. "py/v0.1.0" → "0.1.0". PyPI accepts PEP 440
+          # versions (incl. pre-releases like "0.1.0rc1"); the Python
+          # SDK's pyproject.toml must match whatever the tag says.
+          tag="${GITHUB_REF##*/py/}"
+          version="${tag#v}"
+          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Assert tag matches pyproject.toml version
+        env:
+          EXPECTED: ${{ steps.vars.outputs.version }}
+        run: |
+          set -e
+          ACTUAL="$(grep -E '^version' publishers/python/pyproject.toml | head -1 | cut -d'"' -f2)"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::tag says version=$EXPECTED but publishers/python/pyproject.toml says $ACTUAL"
+            echo "Bump publishers/python/pyproject.toml before tagging, or retag."
+            exit 1
+          fi
+          echo "tag/manifest agree on version=$EXPECTED"
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pin v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install + test
+        working-directory: publishers/python
+        run: |
+          python -m pip install -e .
+          python -m pip install pytest
+          pytest -q tests/
+
+  # ------------------------------------------------------------------
+  # Build — produce sdist + wheel. Runs after preflight green.
+  # ------------------------------------------------------------------
+  build:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pin v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Build sdist + wheel
+        working-directory: publishers/python
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+          ls -la dist/
+
+      - name: Smoke-install the wheel
+        # Defense-in-depth: install the wheel we just built into a
+        # clean venv and confirm the top-level import works. Catches
+        # packaging mistakes (missing files, wrong include rules)
+        # BEFORE we publish to an immutable registry.
+        working-directory: publishers/python
+        run: |
+          python -m venv /tmp/wheelcheck
+          /tmp/wheelcheck/bin/python -m pip install dist/fernsicht-*.whl
+          /tmp/wheelcheck/bin/python -c "from fernsicht import blick, manual; print('import OK')"
+
+      - name: Upload dist as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pin v4.6.2
+        with:
+          name: python-dist
+          path: publishers/python/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # Publish — OIDC-authenticated upload to PyPI. Runs ONLY on a green
+  # build. This is the commit point: PyPI is immutable after success.
+  # ------------------------------------------------------------------
+  publish:
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The environment name is purely informational for the audit log
+    # + any required approval gate. Matches the "(any)" env selector
+    # in the PyPI trusted-publisher config.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/fernsicht/${{ needs.preflight.outputs.version }}
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # pin v4.3.0
+        with:
+          name: python-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        # No `password` / `user` / `api-token` — the action mints an
+        # OIDC token from the id-token: write permission and exchanges
+        # it with PyPI for a short-lived upload token.
+        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc  # pin v1.12.4
+        with:
+          packages-dir: dist/
+          # `print-hash: true` prints SHA256 of each uploaded file so
+          # we have a record in logs matching what PyPI shows.
+          print-hash: true
