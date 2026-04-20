@@ -274,3 +274,6 @@ jobs:
       base64-subjects: ${{ needs.release.outputs.digests }}
       upload-assets: true
       upload-tag-name: ${{ needs.preflight.outputs.tag }}
+      # See cli-release.yml for rationale; required even for public
+      # repos due to a v2.0.0 private-detection quirk.
+      private-repository: true

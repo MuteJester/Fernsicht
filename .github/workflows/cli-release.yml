@@ -473,3 +473,11 @@ jobs:
       base64-subjects: ${{ needs.release.outputs.digests }}
       upload-assets: true
       upload-tag-name: ${{ needs.preflight.outputs.tag }}
+      # Counter-intuitively named: this flag actually means "I'm
+      # aware this repo name will appear in the Sigstore transparency
+      # log." Required even for public repos due to a detection quirk
+      # in the SLSA generator v2.0.0 — it sometimes reports the repo
+      # as private and halts to protect repo-name confidentiality.
+      # For a public repo the name is already public, so overriding
+      # is correct + safe.
+      private-repository: true
