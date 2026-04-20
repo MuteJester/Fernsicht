@@ -235,11 +235,34 @@ jobs:
           done
 
       - name: Sign artifacts (cosign keyless)
+        # Phase 4.12 — defense-in-depth for `curl install.sh | sh`:
+        # the installer script itself is a release asset and gets
+        # signed alongside the binaries. Users can verify the script
+        # before piping it to sh. Rendered Brew/Scoop manifests also
+        # get signed so the tap auto-PR workflow can verify them
+        # before opening PRs.
         env:
           COSIGN_YES: 'true'
         run: |
           cd cli/dist
-          for f in fernsicht-* SHA256SUMS; do
+          # List every asset the sign loop must cover. Using an
+          # explicit enumeration (not a glob) so we catch regressions:
+          # if a new asset type is added to dist/ but not to this
+          # list, the verify step below fails.
+          ASSETS=(
+            fernsicht-darwin-amd64
+            fernsicht-darwin-arm64
+            fernsicht-linux-amd64
+            fernsicht-linux-arm64
+            fernsicht-windows-amd64.exe
+            SHA256SUMS
+            install.sh
+            install.ps1
+            fernsicht.rb
+            fernsicht.json
+          )
+          for f in "${ASSETS[@]}"; do
+            [ -f "$f" ] || { echo "::error::expected asset missing: $f"; exit 1; }
             cosign sign-blob \
               --output-signature "$f.sig" \
               --output-certificate "$f.cert" \
@@ -250,10 +273,15 @@ jobs:
       - name: Verify signatures (sanity)
         run: |
           cd cli/dist
-          for f in fernsicht-* SHA256SUMS; do
+          # Every .sig file must have a matching .cert and verify
+          # successfully. Loop over sig files (not a hand-coded list)
+          # so if the sign step emits sigs we didn't enumerate, we
+          # still verify them — safer fail-mode.
+          for sig in *.sig; do
+            f="${sig%.sig}"
             cosign verify-blob \
               --certificate "$f.cert" \
-              --signature  "$f.sig" \
+              --signature  "$sig" \
               --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               "$f"

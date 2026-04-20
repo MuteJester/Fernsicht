@@ -55,6 +55,47 @@ If openssl's chain validation fails, fernsicht's will too.
 - If you're in a virtualenv: activate it first, or pass the venv's
   python directly: `fernsicht run -- ~/.venv/bin/python script.py`.
 
+## macOS: "fernsicht cannot be opened because the developer cannot be verified"
+
+macOS Gatekeeper rejects binaries that aren't signed with an Apple
+Developer ID. Fernsicht's CLI is currently not Apple-notarized; the
+binaries ARE cosign-signed (Sigstore), which Gatekeeper doesn't
+recognize.
+
+**Preferred fix: use Homebrew.** Homebrew bypasses Gatekeeper entirely
+because Formula bottles are trusted by Homebrew itself:
+
+```bash
+brew tap MuteJester/fernsicht
+brew install MuteJester/fernsicht/fernsicht
+fernsicht --version
+```
+
+**If you must use the `curl | sh` installer** on macOS, remove the
+quarantine attribute after installation:
+
+```bash
+curl -fsSL https://github.com/MuteJester/Fernsicht/releases/latest/download/install.sh | sh
+xattr -d com.apple.quarantine /usr/local/bin/fernsicht
+fernsicht --version
+```
+
+`xattr -d com.apple.quarantine` tells macOS "I trust this file" for
+the specific binary. It's the same escape hatch used by tools like
+`nvm`, Rustup's `rustup-init`, etc.
+
+**Verify the binary's cosign signature before running it** (belt +
+suspenders if you're skipping Gatekeeper):
+
+```bash
+cosign verify-blob \
+  --certificate fernsicht-darwin-arm64.cert \
+  --signature   fernsicht-darwin-arm64.sig \
+  --certificate-identity-regexp 'https://github.com/MuteJester/Fernsicht/.+' \
+  --certificate-oidc-issuer     https://token.actions.githubusercontent.com \
+  /usr/local/bin/fernsicht
+```
+
 ## "Could not allocate pty" (E022)
 
 Some sandboxed environments (certain containers, restricted

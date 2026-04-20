@@ -1,0 +1,108 @@
+# Alert on release-workflow failures.
+#
+# Fires when ANY tag-triggered release workflow (cli-release,
+# bridge-release, python-release, cli-docker, brew-scoop-pr) exits
+# with a non-success conclusion. Opens a GitHub issue with the
+# failed-step logs excerpt so the maintainer can't miss it.
+#
+# Trigger: `workflow_run` on conclusion of each release workflow.
+# Runs in the main repo with contents: write + issues: write.
+#
+# Why a GH issue instead of email/Slack: zero runtime dependencies,
+# zero setup, scales automatically when the team grows. A later
+# phase can add a webhook for real-time alerting.
+
+name: release-alert
+
+on:
+  workflow_run:
+    workflows:
+      - cli-release
+      - cli-docker
+      - bridge-release
+      - python-release
+      - brew-scoop-pr
+    types: [completed]
+
+permissions:
+  # Open/comment on issues on the main repo.
+  issues: write
+  # Read workflow_run context (URL, conclusion).
+  actions: read
+  contents: read
+
+jobs:
+  alert:
+    # Only fire on failures. workflow_run delivers every completion,
+    # including the green ones — filter here.
+    if: ${{ github.event.workflow_run.conclusion != 'success' && github.event.workflow_run.conclusion != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Open issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          WF_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WF_URL: ${{ github.event.workflow_run.html_url }}
+          WF_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          WF_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WF_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          TITLE="Release failed: $WF_NAME ($WF_HEAD_BRANCH)"
+
+          # Attempt to fetch the failing job's name for a tighter
+          # title. `gh api` here is hitting the same run we already
+          # have context for.
+          FAILING_JOB="$(gh api \
+            "repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/jobs" \
+            --jq '[.jobs[] | select(.conclusion=="failure") | .name] | join(", ")' \
+            2>/dev/null || echo 'unknown')"
+
+          BODY=$(cat <<EOF
+          **Workflow:** \`$WF_NAME\`
+          **Conclusion:** \`$WF_CONCLUSION\`
+          **Ref:** \`$WF_HEAD_BRANCH\` (\`$WF_HEAD_SHA\`)
+          **Run attempt:** $WF_RUN_ATTEMPT
+          **Failing job(s):** \`$FAILING_JOB\`
+
+          - [View failed run]($WF_URL)
+
+          ## Triage
+
+          1. Open the workflow run above and read the failed step's
+             log tail.
+          2. If it's a transient failure (network, flake), re-run
+             from the workflow UI.
+          3. If it's a real failure, follow the rollback/recovery
+             runbook in \`cli/RELEASE.md\` §"Partial-release failure
+             recovery".
+          4. Close this issue once the release is clean OR the tag
+             is withdrawn.
+
+          _Auto-opened by \`release-alert.yml\`._
+          EOF
+          )
+
+          # If an issue for the same workflow+ref is already open, comment
+          # on it instead of opening a duplicate.
+          EXISTING="$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --state open \
+            --label "release-failure" \
+            --search "\"$WF_NAME\" \"$WF_HEAD_BRANCH\"" \
+            --json number --jq '.[0].number // empty')"
+
+          if [ -n "$EXISTING" ]; then
+            echo "Commenting on existing issue #$EXISTING"
+            gh issue comment "$EXISTING" \
+              --repo "${{ github.repository }}" \
+              --body "$BODY"
+          else
+            echo "Opening new issue"
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "$TITLE" \
+              --body "$BODY" \
+              --label "release-failure"
+          fi

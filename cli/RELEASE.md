@@ -192,6 +192,87 @@ What we do instead:
 Don't delete tags or release artifacts — that breaks anyone who has
 the old SHA256 cached and tries to verify.
 
+## Partial-release failure recovery
+
+A release touches N independent channels: GH Release, GHCR, Docker
+Hub, Homebrew tap, Scoop bucket, PyPI (for `py/v*` tags), CRAN (for
+`r/v*` tags). Some channels are **immutable** — PyPI never lets a
+version be re-uploaded, and Docker image SHAs are permanent. If the
+pipeline publishes to one and fails on the next, we need a
+deterministic path forward rather than ad-hoc scrambling.
+
+### Channel order + reversibility
+
+The release workflows publish in this order, least-reversible last:
+
+```
+1. Build + sign + SBOM + SLSA provenance   (local, freely retryable)
+2. Green-CI preflight                       (local, retryable)
+3. Supply-chain scan (vuln + license)       (retryable)
+4. macOS binary workaround (Gatekeeper doc) (no action at release time)
+5. Publish GH Release (draft-then-published) (DELETABLE + retryable)
+6. Publish Docker image (GHCR)              (retryable by tag bump)
+7. Publish Docker image (Docker Hub mirror) (retryable by tag bump)
+8. Publish to PyPI                          ⚠️  IMMUTABLE — commit point
+9. Open tap PRs (Brew + Scoop)              (revertable PR)
+```
+
+Steps 1–7 are safely idempotent: a failure anywhere leaves the
+release in a recoverable state. **PyPI publish (step 8) is the commit
+point** — once it succeeds, the version number is permanently claimed
+and you're forward-only.
+
+### Recovery playbook by failure point
+
+| Failed at | State | Action |
+|---|---|---|
+| Preflight (tests / version assertion) | Nothing published | Fix the code / bump the manifest / retag. Safe to reuse the same version number. |
+| Cross-compile / sign | Nothing published | Re-run workflow; repro builds are deterministic so the second run produces identical hashes. |
+| GH Release creation | Draft release may exist | Delete draft from GH UI; re-run workflow. |
+| GHCR / Docker Hub push | Image tag may exist but unsigned | Re-run workflow; cosign will sign on the second pass. |
+| PyPI publish (Python only) | Version claimed; SBOM/SLSA may be missing | **Cut `X.Y.Z+1` ASAP.** Don't try to re-publish the same version — PyPI will refuse. |
+| Tap PR (Brew/Scoop) | Binaries are out; users via `curl \| sh` can install. `brew`/`scoop` users temporarily can't get the new version. | Manually re-run `brew-scoop-pr.yml` via workflow_dispatch, OR copy rendered manifests into tap repos by hand. |
+
+### Stale draft cleanup
+
+Failed runs may leave GH Release drafts or unreferenced GHCR tags.
+No automated reaper today; check the Releases tab quarterly and
+delete drafts older than 7 days that never went public.
+
+## Release failure notifications
+
+`release-alert.yml` listens to every tag-triggered release workflow
+and opens a GH issue in this repo (labeled `release-failure`) if any
+concludes with a non-success status. If an issue is already open for
+the same ref, it comments rather than opening a duplicate. The
+triage checklist in the issue body points back to this playbook.
+
+No Slack/email integration yet — the label is watchable via GH
+notifications; a webhook can be wired in post-v0.1.0 if needed.
+
+## Secret-management policy
+
+Every long-lived secret used by the release pipeline has a documented
+rotation schedule + break-glass procedure:
+
+| Secret | Used by | Scope | Rotation | Break-glass |
+|---|---|---|---|---|
+| `RELEASE_APP_ID` | `brew-scoop-pr.yml` | Public app ID (not a secret, but stored for convenience) | — | — |
+| `RELEASE_APP_PRIVATE_KEY` | `brew-scoop-pr.yml` | GitHub App private key (`.pem`); mints installation tokens scoped to tap repos only | **Every 12 months.** New key via Settings → Developer settings → GitHub Apps → Fernsicht Release Bot → "Generate a private key". | Uninstall app from `homebrew-fernsicht` + `scoop-fernsicht` immediately. |
+| `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` | `cli-docker.yml` | Docker Hub push access (username public; token is a `dckr_pat_*`) | **Every 90 days.** New token via Docker Hub → Account Settings → Security. | Revoke token in Docker Hub UI; push to GHCR still works (separate auth via `GITHUB_TOKEN`). |
+| `GITHUB_TOKEN` | All workflows | Ephemeral per-job token minted by Actions | N/A (per-run) | N/A |
+
+OIDC tokens (PyPI trusted publisher, cosign keyless, SLSA
+provenance) are short-lived and minted on demand; nothing to rotate.
+
+**If a secret is ever pasted in chat, a commit, a bug report, or a
+screenshot — treat it as compromised and rotate immediately**, even
+if the exposure was brief. Log scrapers are fast.
+
+**Secret scanning** — enable GitHub's secret scanning (Settings →
+Code security and analysis) + add a `gitleaks` CI step if we want
+defense-in-depth against accidental commits.
+
 ## Package-manager onramps
 
 Each release also publishes:
