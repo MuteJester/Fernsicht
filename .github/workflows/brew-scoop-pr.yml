@@ -106,7 +106,7 @@ jobs:
       # is full because peter-evans/create-pull-request refuses to
       # operate on shallow clones.
       - name: Checkout tap repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # pin v6.0.2
         with:
           repository: ${{ github.repository_owner }}/${{ matrix.tap.repo }}
           token: ${{ steps.app-token.outputs.token }}
