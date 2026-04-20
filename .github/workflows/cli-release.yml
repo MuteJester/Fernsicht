@@ -379,12 +379,17 @@ jobs:
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Release $TAG already exists — skipping create, proceeding to upload"
           else
+            # NOT using `--verify-tag`. The workflow is already tag-
+            # triggered (only runs when GITHUB_REF is a tag ref), so
+            # the tag's existence is guaranteed by the event that
+            # fired us. `--verify-tag` queries GitHub's REST API
+            # which can 404 briefly after a tag push due to read-
+            # replica lag — a real race with no benefit for us.
             gh release create "$TAG" \
               --repo "${{ github.repository }}" \
               --title "fernsicht CLI $VERSION" \
               --notes-file /tmp/release-notes.md \
-              "${PRERELEASE_FLAG[@]}" \
-              --verify-tag
+              "${PRERELEASE_FLAG[@]}"
           fi
 
       - name: Upload release assets
