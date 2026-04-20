@@ -183,22 +183,25 @@ resolve_version() {
     return
   fi
 
-  # No version specified — resolve "latest" via the GH redirect
-  # endpoint. This avoids API rate-limiting and skips pre-releases.
+  # No version specified — ask the GitHub API for the latest non-
+  # prerelease tag_name. We used to parse the /releases/latest/
+  # download/X redirect, but GitHub now routes release assets via
+  # pre-signed Azure blob URLs that don't contain the tag name in
+  # the path, so that approach silently broke.
   step "Resolving latest release..."
-  redirect_target=$(
-    curl -fsSL -o /dev/null -w '%{url_effective}' \
-      "${BASE_URL}/latest/download/SHA256SUMS"
-  ) || {
-    err "could not resolve latest release."
-    err "set VERSION=cli/vX.Y.Z manually."
+  api_url="https://api.github.com/repos/${REPO}/releases/latest"
+  # `jq` is commonly NOT installed on a fresh box, so grep+cut the
+  # tag_name out of the raw JSON. The response format is stable.
+  api_body=$(curl -fsSL -H "Accept: application/vnd.github+json" "$api_url") || {
+    err "could not query GitHub API: $api_url"
+    err "set VERSION=cli/vX.Y.Z manually to skip this step."
     exit 1
   }
-  # Redirect URL looks like:
-  #   https://github.com/.../releases/download/cli/v0.1.0/SHA256SUMS
-  TAG=$(echo "$redirect_target" | sed -n 's|.*/releases/download/\(cli/v[^/]*\)/.*|\1|p')
+  TAG=$(printf '%s' "$api_body" | grep -E '"tag_name"\s*:' | head -1 | \
+          sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
   if [ -z "$TAG" ]; then
-    err "could not parse release tag from redirect: $redirect_target"
+    err "could not parse tag_name from GitHub API response"
+    err "raw response (first 200 chars): $(printf '%s' "$api_body" | head -c 200)"
     exit 1
   fi
   ok "Latest release: $TAG"

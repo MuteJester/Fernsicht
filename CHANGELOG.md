@@ -18,6 +18,20 @@ Landing in the next release.
 
 ---
 
+## [cli/v0.1.2] — 2026-04-20
+
+### Fixed
+
+- **`install.sh` + `install.ps1` both failed "latest release"
+  resolution.** Both installers relied on parsing the `/releases/
+  latest/download/*` redirect URL for the version tag, but GitHub
+  now routes release assets via pre-signed Azure blob URLs that
+  don't contain the tag name in the path. Switched both to the
+  stable GitHub REST API (`/repos/.../releases/latest`) which
+  returns JSON with `tag_name`. No more redirect-chain parsing.
+
+---
+
 ## [cli/v0.1.1] — 2026-04-20
 
 ### Fixed

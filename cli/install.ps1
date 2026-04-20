@@ -63,17 +63,26 @@ Write-Host ""
 
 if (-not $Version) {
     Step "Resolving latest release..."
+    # Use the GitHub REST API rather than parsing /releases/latest/
+    # download/* redirects. GitHub recently started routing release
+    # assets via pre-signed Azure blob URLs (release-assets.github-
+    # usercontent.com/...?sig=...) that don't contain the tag name
+    # in the path, so the old regex-on-redirect approach fails.
+    #
+    # The API response is stable JSON with `tag_name` in the root —
+    # no parsing fragility. Rate limit is 60/hour unauth on a public
+    # repo, which is plenty for an installer.
     try {
-        $resp = Invoke-WebRequest -Uri "$BaseUrl/latest/download/SHA256SUMS" -MaximumRedirection 5 -UseBasicParsing
-        # The response URL after redirect contains the version tag.
-        $finalUrl = $resp.BaseResponse.ResponseUri.AbsoluteUri
-        if ($finalUrl -match '/releases/download/(cli/v[^/]+)/') {
-            $Tag = $Matches[1]
-        } else {
-            Fail "Could not parse release tag from redirect: $finalUrl"
+        # PS 5.1 defaults to TLS 1.0/1.1 which GitHub rejects. Force
+        # TLS 1.2 for the duration of this session.
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $api = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing
+        $Tag = $api.tag_name
+        if (-not $Tag) {
+            Fail "GitHub API response missing tag_name"
         }
     } catch {
-        Fail "Could not resolve latest release: $_"
+        Fail "Could not resolve latest release via GitHub API: $_"
     }
     Ok "Latest release: $Tag"
 } else {
