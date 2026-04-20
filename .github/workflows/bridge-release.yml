@@ -269,7 +269,7 @@ jobs:
       actions: read
       id-token: write
       contents: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a  # pin v2.1.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0  # tag pin (SHA pins rejected by SLSA self-identity check; v2.1.0 tag is protected by SLSA maintainers)
     with:
       base64-subjects: ${{ needs.release.outputs.digests }}
       upload-assets: true
