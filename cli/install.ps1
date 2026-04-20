@@ -112,8 +112,14 @@ try {
     if (-not $SkipVerify) {
         Step "Verifying SHA256..."
         $expected = $null
+        # Pre-compute the escaped asset name OUTSIDE the regex string.
+        # Windows PowerShell 5.1 can't parse `[regex]::Escape(...)`
+        # inside a double-quoted string's subexpression — it misreads
+        # the leading `[` as a type-cast token and the whole script
+        # fails at parse time.
+        $assetPattern = [regex]::Escape($AssetName)
         Get-Content "$tmp\SHA256SUMS" | ForEach-Object {
-            if ($_ -match "^([0-9a-f]+)\s+$([regex]::Escape($AssetName))$") {
+            if ($_ -match "^([0-9a-f]+)\s+$assetPattern$") {
                 $expected = $Matches[1]
             }
         }
@@ -158,7 +164,11 @@ try {
     if ($userPath -notlike "*$InstallDir*") {
         Warn "$InstallDir is not on your PATH"
         Warn "to add it permanently:"
-        Write-Host "  [Environment]::SetEnvironmentVariable('Path', `$env:Path + ';$InstallDir', 'User')" -ForegroundColor Cyan
+        # Print the snippet as a single-quoted string literal to avoid
+        # PowerShell 5.1 parsing the embedded [Environment]::... as a
+        # real type cast when interpolating the double-quoted form.
+        $pathSnippet = '  [Environment]::SetEnvironmentVariable(''Path'', $env:Path + '';' + $InstallDir + ''', ''User'')'
+        Write-Host $pathSnippet -ForegroundColor Cyan
         Write-Host "  (then open a new shell for the change to take effect)"
         Write-Host ""
     }
