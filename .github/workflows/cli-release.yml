@@ -316,52 +316,140 @@ jobs:
                        | base64 -w0)"
           echo "digests=$digests" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda  # pin v2.2.1
-        with:
-          tag_name: ${{ needs.preflight.outputs.tag }}
-          name: fernsicht CLI ${{ needs.preflight.outputs.version }}
-          draft: false
-          prerelease: ${{ contains(needs.preflight.outputs.version, '-') }}
-          generate_release_notes: true
-          body: |
-            # fernsicht CLI ${{ needs.preflight.outputs.version }}
+      # Create the release + upload assets via the `gh` CLI. We used
+      # to use softprops/action-gh-release, which uploads files
+      # concurrently and occasionally races the release-creation API,
+      # yielding a "Not Found" 404 on one random asset (~1/30 odds
+      # with our asset count). `gh release upload` is sequential and
+      # retryable, which eliminates the race entirely at the cost of
+      # ~10 extra seconds per release.
+      - name: Compose release notes
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > /tmp/release-notes.md <<EOF
+          # fernsicht CLI $VERSION
 
-            Wrap any command, watch progress from any browser.
+          Wrap any command, watch progress from any browser.
 
-            ## Install (one-liner)
+          ## Install (one-liner)
 
-            ```bash
-            curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sh
-            ```
+          \`\`\`bash
+          curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | sh
+          \`\`\`
 
-            ## Manual download
+          ## Manual download
 
-            Pick your platform below and verify the SHA256 against `SHA256SUMS`.
+          Pick your platform below and verify the SHA256 against \`SHA256SUMS\`.
 
-            ## Verify (cosign keyless)
+          ## Verify (cosign keyless)
 
-            ```bash
-            cosign verify-blob \
-              --certificate fernsicht-linux-amd64.cert \
-              --signature  fernsicht-linux-amd64.sig \
-              --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              fernsicht-linux-amd64
-            ```
+          \`\`\`bash
+          cosign verify-blob \\
+            --certificate fernsicht-linux-amd64.cert \\
+            --signature  fernsicht-linux-amd64.sig \\
+            --certificate-identity-regexp "https://github.com/$REPO/.+" \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+            fernsicht-linux-amd64
+          \`\`\`
 
-            See `cli/RELEASE.md` in the repo for full reproducibility +
-            verification instructions.
-          files: |
-            cli/dist/fernsicht-*
-            cli/dist/SHA256SUMS
-            cli/dist/install.sh
-            cli/dist/install.ps1
-            cli/dist/fernsicht.rb
-            cli/dist/fernsicht.json
-            cli/dist/*.sig
-            cli/dist/*.cert
-            cli/dist/sbom-cli-*.cdx.json
+          See \`cli/RELEASE.md\` in the repo for full reproducibility +
+          verification instructions.
+          EOF
+          head -5 /tmp/release-notes.md
+
+      - name: Create GitHub release (empty)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          # Decide prerelease flag: versions containing a hyphen
+          # (v0.1.0-rc1, v1.0.0-beta) are prereleases.
+          PRERELEASE_FLAG=()
+          case "$VERSION" in
+            *-*) PRERELEASE_FLAG=(--prerelease) ;;
+          esac
+
+          # Idempotency: if a release already exists for this tag
+          # (retry after a partial-failure run), `gh release create`
+          # errors out. We catch that and continue to the upload step
+          # — missing assets will be added via `--clobber`.
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping create, proceeding to upload"
+          else
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "fernsicht CLI $VERSION" \
+              --notes-file /tmp/release-notes.md \
+              "${PRERELEASE_FLAG[@]}" \
+              --verify-tag
+          fi
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          cd cli/dist
+          # Enumerate the full asset set — binaries + checksums + install
+          # scripts + rendered tap manifests + SBOM + every cosign sig/cert.
+          # Upload sequentially with `--clobber` so retry-after-failure is
+          # safe (already-uploaded files are overwritten, not duplicated).
+          assets=(
+            fernsicht-darwin-amd64
+            fernsicht-darwin-arm64
+            fernsicht-linux-amd64
+            fernsicht-linux-arm64
+            fernsicht-windows-amd64.exe
+            SHA256SUMS
+            install.sh
+            install.ps1
+            fernsicht.rb
+            fernsicht.json
+            "sbom-cli-${VERSION}.cdx.json"
+          )
+          # Each primary asset has a matching .sig + .cert from cosign.
+          for a in "${assets[@]}"; do
+            case "$a" in
+              sbom-*) ;;  # SBOM has no cosign signature yet
+              *) assets+=("$a.sig" "$a.cert") ;;
+            esac
+          done
+
+          echo "Uploading ${#assets[@]} assets to $TAG..."
+          for a in "${assets[@]}"; do
+            [ -f "$a" ] || { echo "::error::missing asset $a"; exit 1; }
+            # --clobber: overwrite if the asset already exists (retry
+            # safety). Individual upload failures retry up to 3 times
+            # via a trivial loop — gh itself doesn't retry on 5xx.
+            attempt=1
+            until gh release upload "$TAG" "$a" --clobber \
+                    --repo "${{ github.repository }}"; do
+              if [ $attempt -ge 3 ]; then
+                echo "::error::failed to upload $a after 3 attempts"
+                exit 1
+              fi
+              echo "::warning::$a upload attempt $attempt failed; retrying"
+              attempt=$((attempt + 1))
+              sleep $((attempt * 2))
+            done
+            echo "  ✓ $a"
+          done
+
+          echo "Verifying asset count..."
+          expected=${#assets[@]}
+          actual=$(gh release view "$TAG" --repo "${{ github.repository }}" \
+                    --json assets --jq '.assets | length')
+          if [ "$actual" -lt "$expected" ]; then
+            echo "::error::expected $expected assets, found $actual on release"
+            gh release view "$TAG" --repo "${{ github.repository }}" \
+              --json assets --jq '.assets[].name'
+            exit 1
+          fi
+          echo "Release $TAG has $actual assets (>= $expected expected)."
 
   # ------------------------------------------------------------------
   # SLSA v1.0 provenance (level 3) — runs AFTER the release job so it

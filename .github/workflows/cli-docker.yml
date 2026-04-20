@@ -209,8 +209,22 @@ jobs:
         run: |
           # Sign every tag we just published. Cosign attaches the
           # signature to the registry alongside the image manifest.
+          #
+          # Intentionally NOT using `--recursive`. Recursive signing
+          # writes a separate signature for EACH platform manifest
+          # referenced by a multi-arch index (2 platforms × N tags =
+          # 2N writes), and GHCR rate-limits rapid package-blob
+          # writes — we hit `DENIED: permission_denied: write_package`
+          # on the 5th sign in our first rehearsal. Signing only the
+          # top-level digest (index) is the industry-standard pattern:
+          # `cosign verify <image>:tag` resolves the tag to the index
+          # digest and verifies against that signature regardless of
+          # the platform the client pulls.
           for tag in $(echo '${{ steps.tags.outputs.tags }}' | tr ',' ' '); do
-            cosign sign --recursive "${tag}@${DIGEST}"
+            cosign sign "${tag}@${DIGEST}"
+            # Brief pause between registries to avoid GHCR's write
+            # throttle when we sign 4+ tags in quick succession.
+            sleep 1
           done
 
       - name: Verify signature (sanity)
