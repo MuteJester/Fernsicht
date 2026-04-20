@@ -146,7 +146,6 @@ func (f *fakeSignalingServer) handleSession(w http.ResponseWriter, r *http.Reque
 	resp := map[string]any{
 		"room_id":            f.roomID,
 		"sender_secret":      f.secret,
-		"sender_token":       "v1-token-ignored",
 		"viewer_url":         fmt.Sprintf("https://app.example/#room=%s", f.roomID),
 		"signaling_url":      f.srv.URL,
 		"expires_at":         "2026-04-19T12:00:00Z",

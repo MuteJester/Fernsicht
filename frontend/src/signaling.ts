@@ -2,7 +2,6 @@
 
 export interface SessionInfo {
   room_id: string;
-  sender_token: string;
   sender_secret: string;
   viewer_url: string;
   signaling_url: string;

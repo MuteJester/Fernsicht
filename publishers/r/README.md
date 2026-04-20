@@ -136,6 +136,18 @@ development (skips download + cache lookup).
   contacts the configured signaling server and GitHub releases (for
   the one-time bridge download).
 
+## Other ways to use Fernsicht
+
+Don't want a code change at all? Two alternatives:
+
+- **CLI** — `fernsicht run -- Rscript train.R` wraps any command
+  and auto-detects common progress patterns. See
+  [`cli/README.md`](https://github.com/MuteJester/Fernsicht/tree/main/cli).
+- **Python** — `pip install fernsicht` for the sibling SDK.
+
+All three speak the same wire protocol; rooms / viewer URLs /
+hosted defaults are identical.
+
 ## Status
 
 Pre-release. The headline `blick()` API is stable; lower-level

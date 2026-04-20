@@ -94,6 +94,13 @@
                       class="lang-tab is-active"
                       role="tab"
                       aria-selected="true"
+                      data-lang="cli"
+                      type="button"
+                    >shell</button>
+                    <button
+                      class="lang-tab"
+                      role="tab"
+                      aria-selected="false"
                       data-lang="python"
                       type="button"
                     >python</button>
@@ -104,12 +111,24 @@
                       data-lang="r"
                       type="button"
                     >r</button>
-                    <span class="lang-tab-soon" aria-hidden="true">julia · ruby · matlab · lua  · next</span>
+                    <span class="lang-tab-soon" aria-hidden="true">julia · ruby · matlab · lua · next</span>
                   </div>
 
-                  <div class="lang-card" data-active-lang="python">
+                  <div class="lang-card" data-active-lang="cli">
+                    <!-- Shell / CLI pane (default — wraps any tool) -->
+                    <div class="lang-pane" data-lang="cli">
+                      <div class="lang-pane-head">
+                        <span class="lang-pane-label">install</span>
+                        <code class="lang-pane-cmd">curl -fsSL https://github.com/MuteJester/Fernsicht/releases/latest/download/install.sh | sh</code>
+                      </div>
+                      <div class="lang-pane-divider"></div>
+                      <pre class="lang-pane-code"><span class="lang-comment"># Wraps any command in any language. No SDK, no code change.</span>
+$ fernsicht run -- pip install pandas
+
+<span class="lang-output"><span class="lang-output-prefix">→</span> <span class="lang-url">https://app.fernsicht.space#room=abc12345</span></span></pre>
+                    </div>
                     <!-- Python pane -->
-                    <div class="lang-pane" data-lang="python">
+                    <div class="lang-pane" data-lang="python" hidden>
                       <div class="lang-pane-head">
                         <span class="lang-pane-label">install</span>
                         <code class="lang-pane-cmd">pip install fernsicht</code>
@@ -139,7 +158,7 @@ results &lt;- blick(items, process)
                     </div>
                   </div>
                 </div>
-                <p>Wrap any loop or long task with <code>blick()</code>.</p>
+                <p>Wrap any loop, long task, or shell command. The CLI works with no code change; the Python and R SDKs offer a one-import path inside your code.</p>
               </div>
             </div>
             <div class="step-connector"></div>

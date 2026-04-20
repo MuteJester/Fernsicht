@@ -89,8 +89,7 @@ func TestOpenSessionHappyPath(t *testing.T) {
 			"expires_at": "2026-04-19T12:00:00Z",
 			"expires_in": 43200,
 			"max_viewers": 8,
-			"poll_interval_hint": 25,
-			"sender_token": "v1-token-ignored-by-bridge"
+			"poll_interval_hint": 25
 		}`))
 	})
 

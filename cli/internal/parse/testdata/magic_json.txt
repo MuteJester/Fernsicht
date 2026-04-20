@@ -1,0 +1,8 @@
+__fernsicht__ {"value":0.5}
+__fernsicht__ {"n":50,"total":100}
+__fernsicht__ {"value":0.5,"n":50,"total":100,"label":"Training","unit":"batch"}
+__fernsicht__ {"event":"start","label":"Phase 1"}
+__fernsicht__ {"event":"end"}
+__fernsicht__ {"event":"end","task_id":"epoch-3"}
+__fernsicht__ {"event":"label","label":"New label"}
+__fernsicht__ {"event":"url"}

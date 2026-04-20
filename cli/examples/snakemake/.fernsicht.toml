@@ -1,0 +1,13 @@
+# fernsicht config for the snakemake demo.
+# When you `fernsicht run` from this directory (or any subdirectory),
+# these defaults apply automatically.
+
+[run]
+default_label = "snakemake"
+default_unit  = "step"
+
+[[detection.patterns]]
+name  = "snakemake"
+regex = '\[(\d+) of (\d+) steps \((\d+)%\) done\]'
+n_capture     = 1
+total_capture = 2

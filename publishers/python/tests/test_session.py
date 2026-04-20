@@ -17,7 +17,7 @@ def test_create_session_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
         def read(self) -> bytes:
             return (
-                b'{"room_id":"abc123","sender_token":"tok","sender_secret":"s1","viewer_url":"https://viewer/#room=abc123&role=viewer",'
+                b'{"room_id":"abc123","sender_secret":"s1","viewer_url":"https://viewer/#room=abc123&role=viewer",'
                 b'"signaling_url":"https://signal.fernsicht.space","expires_at":"2026-01-01T00:00:00Z","expires_in":60,'
                 b'"poll_interval_hint":25}'
             )
@@ -26,7 +26,6 @@ def test_create_session_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
     info = create_session(session_url="https://signal.fernsicht.space/session")
     assert info.room_id == "abc123"
-    assert info.sender_token == "tok"
     assert info.sender_secret == "s1"
     assert info.signaling_url == "https://signal.fernsicht.space"
     assert info.poll_interval_hint == 25
@@ -59,7 +58,7 @@ def test_create_session_sends_max_viewers_json(monkeypatch: pytest.MonkeyPatch) 
 
         def read(self) -> bytes:
             return (
-                b'{"room_id":"abc123","sender_token":"tok","sender_secret":"s1","viewer_url":"https://viewer/#room=abc123&role=viewer",'
+                b'{"room_id":"abc123","sender_secret":"s1","viewer_url":"https://viewer/#room=abc123&role=viewer",'
                 b'"signaling_url":"https://signal.fernsicht.space","expires_at":"2026-01-01T00:00:00Z","expires_in":60,'
                 b'"max_viewers":4,"poll_interval_hint":25}'
             )

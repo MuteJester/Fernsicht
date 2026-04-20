@@ -1,12 +1,13 @@
 # Fernsicht Wire Protocol V2
 
 This document describes the Fernsicht protocol as implemented by the V2
-connectionless signaling server, the Python SDK, and the browser viewer.
+connectionless signaling server and every sender (the Go bridge embedded in
+the CLI, the Python SDK, the R SDK) plus the browser viewer.
 
 ## 1. Architecture
 
-1. Sender (Python SDK) calls `POST /session` on the signaling server. The
-   server registers a room and returns a `sender_secret`.
+1. The sender (CLI / Python / R) calls `POST /session` on the signaling
+   server. The server registers a room and returns a `sender_secret`.
 2. Sender polls `GET /poll/{room_id}?secret=…` on a fixed interval.
 3. Viewer (browser) creates a WebRTC offer locally, then `POST /watch` with
    the offer. The server returns a ticket ID.

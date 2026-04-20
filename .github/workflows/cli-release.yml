@@ -1,0 +1,187 @@
+# Build, sign, and publish a fernsicht CLI release.
+#
+# Triggered by pushing a tag matching `cli/v*` (e.g., `cli/v0.1.0`).
+# Steps:
+#   1. Cross-compile for 5 platforms (linux/macOS/Windows × amd64/arm64).
+#   2. Generate SHA256SUMS.
+#   3. Sign every artifact with cosign keyless (GitHub OIDC + Sigstore).
+#   4. Create a GitHub release and upload all artifacts + signatures.
+#
+# Reproducibility: SOURCE_DATE_EPOCH is set from the tagged commit's
+# timestamp so anyone can rebuild and verify SHA256s match. The
+# documented procedure lives in cli/RELEASE.md §Reproducible Builds.
+#
+# Cosign keyless signing uses Sigstore's Fulcio CA + the GH OIDC token.
+# Verifiers DON'T need a public key — they verify against the cert's
+# subject (the GH workflow identity). See cli/RELEASE.md §Verifying.
+
+name: cli-release
+
+on:
+  push:
+    tags:
+      - 'cli/v*'
+
+permissions:
+  # OIDC token for cosign keyless signing.
+  id-token: write
+  # Create / update the GitHub release.
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Need the commit's history to derive SOURCE_DATE_EPOCH from
+          # the tag's commit timestamp.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: cli/go.sum
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.5.0'
+
+      - name: Resolve version + reproducible timestamp
+        id: vars
+        run: |
+          # Tag is e.g. "cli/v0.1.0". Strip the "cli/" prefix → "v0.1.0".
+          tag="${GITHUB_REF##*/cli/}"
+          version="${tag#v}"
+          # SOURCE_DATE_EPOCH from the tagged commit's committer timestamp.
+          # Anyone rebuilding with this same value gets identical binaries.
+          source_date_epoch="$(git log -1 --format=%ct "$GITHUB_REF")"
+          echo "version=$version"               >> "$GITHUB_OUTPUT"
+          echo "source_date_epoch=$source_date_epoch" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"                       >> "$GITHUB_OUTPUT"
+
+      - name: Cross-compile + SHA256SUMS
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+          SOURCE_DATE_EPOCH: ${{ steps.vars.outputs.source_date_epoch }}
+        run: make -C cli dist
+
+      - name: Stage install scripts as release assets
+        # Copy install.sh / install.ps1 into dist/ so the release-
+        # creation step uploads them alongside the binaries. Users
+        # then install via:
+        #   curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sh
+        run: |
+          cp cli/install.sh  cli/dist/install.sh
+          cp cli/install.ps1 cli/dist/install.ps1
+          chmod +x cli/dist/install.sh
+          ls -la cli/dist/
+
+      - name: Render Brew + Scoop templates
+        # Substitute SHA256s + version into the templates and stage
+        # them as release assets. Maintainers then copy `fernsicht.rb`
+        # into the homebrew-fernsicht tap repo and `fernsicht.json`
+        # into the scoop-fernsicht bucket repo. (Future polish: a
+        # follow-up workflow auto-PRs to those tap repos.)
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          cd cli/dist
+          sha_of() { grep " $1\$" SHA256SUMS | awk '{print $1}'; }
+          SHA_DARWIN_AMD64="$(sha_of fernsicht-darwin-amd64)"
+          SHA_DARWIN_ARM64="$(sha_of fernsicht-darwin-arm64)"
+          SHA_LINUX_AMD64="$(sha_of fernsicht-linux-amd64)"
+          SHA_LINUX_ARM64="$(sha_of fernsicht-linux-arm64)"
+          SHA_WINDOWS_AMD64="$(sha_of fernsicht-windows-amd64.exe)"
+
+          for tmpl in ../dist-templates/fernsicht.rb.tmpl ../dist-templates/fernsicht.json.tmpl; do
+            out="$(basename "${tmpl%.tmpl}")"
+            sed \
+              -e "s|__VERSION__|$VERSION|g" \
+              -e "s|__TAG__|$TAG|g" \
+              -e "s|__SHA_DARWIN_AMD64__|$SHA_DARWIN_AMD64|g" \
+              -e "s|__SHA_DARWIN_ARM64__|$SHA_DARWIN_ARM64|g" \
+              -e "s|__SHA_LINUX_AMD64__|$SHA_LINUX_AMD64|g" \
+              -e "s|__SHA_LINUX_ARM64__|$SHA_LINUX_ARM64|g" \
+              -e "s|__SHA_WINDOWS_AMD64__|$SHA_WINDOWS_AMD64|g" \
+              "$tmpl" > "$out"
+            echo "→ $out"
+          done
+
+      - name: Sign artifacts (cosign keyless)
+        env:
+          COSIGN_YES: 'true'
+        run: |
+          cd cli/dist
+          for f in fernsicht-* SHA256SUMS; do
+            cosign sign-blob \
+              --output-signature "$f.sig" \
+              --output-certificate "$f.cert" \
+              "$f"
+          done
+          ls -la
+
+      - name: Verify signatures (sanity)
+        run: |
+          cd cli/dist
+          for f in fernsicht-* SHA256SUMS; do
+            cosign verify-blob \
+              --certificate "$f.cert" \
+              --signature  "$f.sig" \
+              --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$f"
+          done
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: fernsicht CLI ${{ steps.vars.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(steps.vars.outputs.version, '-') }}
+          generate_release_notes: true
+          body: |
+            # fernsicht CLI ${{ steps.vars.outputs.version }}
+
+            Wrap any command, watch progress from any browser.
+
+            ## Install (one-liner)
+
+            ```bash
+            curl -fsSL https://fernsicht.space/install.sh | sh
+            ```
+
+            ## Manual download
+
+            Pick your platform below and verify the SHA256 against `SHA256SUMS`.
+
+            ## Verify (cosign keyless)
+
+            ```bash
+            cosign verify-blob \
+              --certificate fernsicht-linux-amd64.cert \
+              --signature  fernsicht-linux-amd64.sig \
+              --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              fernsicht-linux-amd64
+            ```
+
+            See `cli/RELEASE.md` in the repo for full reproducibility +
+            verification instructions.
+          files: |
+            cli/dist/fernsicht-*
+            cli/dist/SHA256SUMS
+            cli/dist/install.sh
+            cli/dist/install.ps1
+            cli/dist/fernsicht.rb
+            cli/dist/fernsicht.json
+            cli/dist/*.sig
+            cli/dist/*.cert

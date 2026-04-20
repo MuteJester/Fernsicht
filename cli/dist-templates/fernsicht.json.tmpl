@@ -1,0 +1,31 @@
+{
+  "$comment": "Scoop manifest template for fernsicht CLI on Windows. Placeholders are filled at release time. See dist-templates/README.md.",
+  "version": "__VERSION__",
+  "description": "Watch any command's progress from anywhere — peer-to-peer via WebRTC",
+  "homepage": "https://github.com/MuteJester/Fernsicht",
+  "license": "AGPL-3.0-or-later",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/MuteJester/Fernsicht/releases/download/__TAG__/fernsicht-windows-amd64.exe",
+      "hash": "__SHA_WINDOWS_AMD64__",
+      "bin": [
+        ["fernsicht-windows-amd64.exe", "fernsicht"]
+      ]
+    }
+  },
+  "checkver": {
+    "github": "https://github.com/MuteJester/Fernsicht",
+    "regex": "/releases/tag/cli/v(\\d+\\.\\d+\\.\\d+)"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/MuteJester/Fernsicht/releases/download/cli/v$version/fernsicht-windows-amd64.exe",
+        "hash": {
+          "url": "$baseurl/SHA256SUMS",
+          "regex": "(?<sha>[a-f0-9]+)\\s+fernsicht-windows-amd64\\.exe"
+        }
+      }
+    }
+  }
+}

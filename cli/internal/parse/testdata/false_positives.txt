@@ -1,0 +1,11 @@
+starting build
+[1/2] Compiling foo.o
+loading config
+running tests
+error rate: 42% over last hour
+no significant changes
+deploying release
+Allocating 85% of available memory
+checking heartbeat
+Step 1: setup ran in 12ms
+done

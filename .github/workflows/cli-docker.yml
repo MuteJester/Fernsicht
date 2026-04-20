@@ -1,0 +1,133 @@
+# Build and publish the fernsicht CLI Docker image to GitHub Container
+# Registry on every CLI release tag.
+#
+# Image tags published:
+#   ghcr.io/<owner>/fernsicht:latest          (only when pushing a stable tag)
+#   ghcr.io/<owner>/fernsicht:v<MAJOR>        (e.g. v0)
+#   ghcr.io/<owner>/fernsicht:v<MAJOR>.<MIN>  (e.g. v0.1)
+#   ghcr.io/<owner>/fernsicht:v<MAJOR>.<MIN>.<PATCH>
+#
+# All tags are signed with cosign keyless (matching the binary release
+# pipeline). Verify with:
+#   cosign verify ghcr.io/<owner>/fernsicht:latest \
+#     --certificate-identity-regexp 'https://github.com/MuteJester/Fernsicht/.+' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+name: cli-docker
+
+on:
+  push:
+    tags:
+      - 'cli/v*'
+
+permissions:
+  contents: read
+  packages: write   # push to ghcr.io
+  id-token: write   # cosign keyless signing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version + reproducible timestamp
+        id: vars
+        run: |
+          tag="${GITHUB_REF##*/cli/}"           # "v0.1.0"
+          version="${tag#v}"                     # "0.1.0"
+          source_date_epoch="$(git log -1 --format=%ct "$GITHUB_REF")"
+          commit="$(git rev-parse --short HEAD)"
+          build_date="$(date -u -d "@$source_date_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+          # Lower-case repo owner for ghcr (GHCR rejects uppercase).
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "commit=$commit"
+            echo "build_date=$build_date"
+            echo "source_date_epoch=$source_date_epoch"
+            echo "owner=$owner"
+            echo "image=ghcr.io/${owner}/fernsicht"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        # Needed for cross-arch (linux/arm64) builds on the
+        # ubuntu-latest amd64 runner.
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute Docker tags
+        id: tags
+        run: |
+          v="${{ steps.vars.outputs.version }}"
+          image="${{ steps.vars.outputs.image }}"
+          # Skip "latest" + short tags for pre-releases (anything with
+          # a hyphen, e.g. v0.1.0-rc1).
+          if [[ "$v" == *-* ]]; then
+            tags="$image:v$v"
+          else
+            major="${v%%.*}"
+            minor="${v%.*}"
+            tags="$image:v$v,$image:v$minor,$image:v$major,$image:latest"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "Tags: $tags"
+
+      - name: Build + push (multi-arch)
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: cli/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          # Pass the same build args we use locally so the image's
+          # `fernsicht --version` reports a meaningful version.
+          build-args: |
+            VERSION=${{ steps.vars.outputs.version }}
+            COMMIT=${{ steps.vars.outputs.commit }}
+            BUILD_DATE=${{ steps.vars.outputs.build_date }}
+            SOURCE_DATE_EPOCH=${{ steps.vars.outputs.source_date_epoch }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.5.0'
+
+      - name: Sign image (cosign keyless)
+        env:
+          COSIGN_YES: 'true'
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          # Sign every tag we just published. Cosign attaches the
+          # signature to the registry alongside the image manifest.
+          for tag in $(echo '${{ steps.tags.outputs.tags }}' | tr ',' ' '); do
+            cosign sign --recursive "${tag}@${DIGEST}"
+          done
+
+      - name: Verify signature (sanity)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          first_tag="$(echo '${{ steps.tags.outputs.tags }}' | cut -d, -f1)"
+          cosign verify "${first_tag}@${DIGEST}" \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            > /dev/null
+          echo "verified: $first_tag"

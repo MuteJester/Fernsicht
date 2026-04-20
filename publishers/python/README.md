@@ -48,12 +48,10 @@ No configuration is required for the default hosted node — the SDK points at
 
 ### Self-hosting
 
-To use your own signaling server, set one of:
+To use your own signaling server:
 
 ```bash
 export FERNSICHT_SERVER_URL="https://your-signal-domain"
-# or supply a direct session URL:
-export FERNSICHT_SESSION_URL="https://your-signal-domain/session"
 ```
 
 ### Authenticated session endpoint
@@ -64,15 +62,11 @@ If your server requires an API key on `POST /session`:
 export FERNSICHT_SESSION_API_KEY="your-api-key"
 ```
 
-### Legacy env var
-
-`FERNSICHT_SIGNALING_URL` is still accepted (for backwards compatibility with
-old configs). A `wss://…/ws` value is automatically converted to `https://…`.
-
 ## Viewer limits
 
-- Default is `max_viewers=1` (single concurrent viewer).
-- Set `max_viewers > 1` for multi-viewer rooms.
+- Default is `max_viewers=8` (matches the R SDK and CLI defaults).
+- Pass `max_viewers=1` for a single-viewer-only room, or any value
+  up to the server's `MAX_VIEWERS_PER_ROOM` cap.
 - The server enforces an upper bound via `MAX_VIEWERS_PER_ROOM`.
 
 ## How it works
@@ -88,3 +82,16 @@ old configs). A `wss://…/ws` value is automatically converted to `https://…`
 
 No persistent connection is held by the SDK. Between polls, the background
 thread is idle.
+
+## Other ways to use Fernsicht
+
+Don't want to add a `blick()` import? Two alternatives:
+
+- **CLI** — `fernsicht run -- python train.py` wraps any command and
+  auto-detects tqdm/`[N/M]`/percent-style progress with no code change.
+  See [`cli/README.md`](https://github.com/MuteJester/Fernsicht/tree/main/cli).
+- **R** — `remotes::install_github("MuteJester/Fernsicht", subdir="publishers/r")`
+  for the R sibling SDK.
+
+All three speak the same wire protocol; rooms / viewer URLs / hosted
+defaults are identical.

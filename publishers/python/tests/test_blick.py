@@ -4,7 +4,7 @@ import pytest
 
 import fernsicht._blick as blick_module
 from fernsicht._blick import FernsichtBar, blick, manual
-from fernsicht._session import SessionBootstrapError, SessionInfo
+from fernsicht._session import SessionBootstrapError
 
 
 def test_blick_iterates_all_items():
@@ -128,59 +128,3 @@ def test_bootstrap_failure_raises_by_default(monkeypatch: pytest.MonkeyPatch):
 def test_max_viewers_validation() -> None:
     with pytest.raises(ValueError, match="max_viewers must be >= 1"):
         FernsichtBar(total=1, disable=False, max_viewers=0)
-
-
-def test_max_viewers_conflict_validation() -> None:
-    with pytest.raises(ValueError, match="must match"):
-        FernsichtBar(
-            total=1,
-            disable=False,
-            max_viewers=2,
-            multi_viewer=3,
-        )
-
-
-def test_multi_viewer_alias_forwards_to_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, int | None] = {"max_viewers": None}
-
-    class DummyTransport:
-        def __init__(self, *args, **kwargs):
-            self.closed = False
-
-        def post(self, **kwargs):
-            return None
-
-        def send_error(self, **kwargs):
-            return None
-
-        def close(self, **kwargs):
-            self.closed = True
-
-    def _create_session(
-        *,
-        session_url: str,
-        timeout_sec: float = 5.0,
-        api_key: str | None = None,
-        max_viewers: int | None = None,
-    ) -> SessionInfo:
-        captured["max_viewers"] = max_viewers
-        return SessionInfo(
-            room_id="abc12345",
-            sender_token="tok",
-            sender_secret="secret",
-            viewer_url="https://app.fernsicht.space/#room=abc12345&role=viewer",
-            signaling_url="https://signal.fernsicht.space",
-            expires_at=None,
-            expires_in=None,
-            max_viewers=max_viewers,
-            poll_interval_hint=25,
-        )
-
-    monkeypatch.setattr(blick_module, "Transport", DummyTransport)
-    monkeypatch.setattr(blick_module, "create_session", _create_session)
-
-    bar = FernsichtBar(total=1, disable=False, multi_viewer=4)
-    assert captured["max_viewers"] == 4
-    bar.close()

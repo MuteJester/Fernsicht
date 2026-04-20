@@ -29,6 +29,16 @@ const DATACHANNEL_LABEL = "fernsicht";
 const ICE_POLL_INTERVAL_MS = 500;
 const ICE_POLL_MAX_ROUNDS = 30; // 15 seconds
 
+// How long to allow the peer-connection to sit in WebRTC's transient
+// "disconnected" state before treating it as a real failure. Mobile
+// networks routinely flip ICE transports through brief disconnect
+// windows that recover on their own; tearing down at the first hint
+// of trouble (the previous behavior) caused phantom "Disconnected"
+// banners while the sender was still streaming. The spec promises
+// either recovery to "connected" or escalation to "failed" — we wait
+// for one or the other.
+const DISCONNECT_RECOVERY_GRACE_MS = 30_000;
+
 // --- Viewer Peer ---
 
 export class ViewerPeer {
@@ -37,6 +47,7 @@ export class ViewerPeer {
   private signaling: ViewerSignaling;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private icePollTimer: ReturnType<typeof setTimeout> | null = null;
+  private disconnectGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingICE: RTCIceCandidateInit[] = [];
   private iceSendSeq = 0;
   private iceRecvSeq = 0;
@@ -92,6 +103,7 @@ export class ViewerPeer {
 
   close(): void {
     this.closed = true;
+    this.clearDisconnectGrace();
     this.stopKeepAlive();
     this.stopICEPoll();
     this.signaling.stop();
@@ -109,12 +121,47 @@ export class ViewerPeer {
     this.pc.onconnectionstatechange = () => {
       const state = this.pc.connectionState;
       this.events.onStateChange(state);
-      if (state === "disconnected" || state === "failed" || state === "closed") {
+
+      if (state === "connected") {
+        // Recovered (or first connect) — cancel any pending grace timer.
+        this.clearDisconnectGrace();
+        return;
+      }
+
+      if (state === "failed" || state === "closed") {
+        // Terminal — tear down immediately.
+        this.clearDisconnectGrace();
         this.stopKeepAlive();
         this.stopICEPoll();
         this.events.onClose();
+        return;
+      }
+
+      if (state === "disconnected") {
+        // Transient. Per the WebRTC spec the connection may recover to
+        // "connected" without intervention — don't tear down yet. Start
+        // a grace timer; if we're still disconnected when it fires,
+        // treat it as a real failure.
+        if (this.disconnectGraceTimer === null) {
+          this.disconnectGraceTimer = setTimeout(() => {
+            this.disconnectGraceTimer = null;
+            if (this.closed) return;
+            if (this.pc.connectionState !== "connected") {
+              this.stopKeepAlive();
+              this.stopICEPoll();
+              this.events.onClose();
+            }
+          }, DISCONNECT_RECOVERY_GRACE_MS);
+        }
       }
     };
+  }
+
+  private clearDisconnectGrace(): void {
+    if (this.disconnectGraceTimer !== null) {
+      clearTimeout(this.disconnectGraceTimer);
+      this.disconnectGraceTimer = null;
+    }
   }
 
   private setupDataChannel(dc: RTCDataChannel): void {

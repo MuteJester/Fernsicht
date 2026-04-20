@@ -30,7 +30,30 @@ Fernsicht lets you wrap any long-running loop and share live progress with anyon
 ## Quick Start
 
 <details open>
-<summary><b>Python</b></summary>
+<summary><b>CLI — wraps any command, in any language</b></summary>
+
+### 1. Install
+```bash
+curl -fsSL https://github.com/MuteJester/Fernsicht/releases/latest/download/install.sh | sh
+```
+
+### 2. Wrap any long-running command
+```bash
+fernsicht run -- python train.py
+fernsicht run -- snakemake --cores 4
+fernsicht run -- pip install pandas
+```
+
+No SDK, no code change. Auto-detects tqdm / pip / snakemake-style
+progress; explicit progress via the `__fernsicht__` magic prefix from
+any program.
+
+See [`cli/README.md`](cli/README.md) and [`cli/docs/`](cli/docs/) for
+flags, recipes, troubleshooting.
+</details>
+
+<details>
+<summary><b>Python SDK</b></summary>
 
 ### 1. Install
 ```bash
@@ -48,7 +71,7 @@ for _ in blick(range(100), desc="Training"):
 </details>
 
 <details>
-<summary><b>R</b></summary>
+<summary><b>R SDK</b></summary>
 
 ### 1. Install
 ```r
@@ -87,15 +110,16 @@ No WebSockets. No long-lived connections. The viewer creates the offer (viewer-o
 
 ## Hosted Defaults
 
-The Python SDK uses these defaults out of the box:
+All publishers (CLI, Python SDK, R SDK) ship with these hosted
+defaults — no signup, no config required:
 
 - Session/signaling API: `https://signal.fernsicht.space`
 - Viewer app: `https://app.fernsicht.space`
 
-Override for self-hosting:
+Override for self-hosting (or pointing at staging):
 
 ```bash
-export FERNSICHT_SESSION_URL="https://your-signal-domain/session"
+export FERNSICHT_SERVER_URL="https://your-signal-domain"
 ```
 
 ## Progress Data
@@ -114,13 +138,19 @@ Each progress update includes:
 ## Repository Layout
 
 ```text
-frontend/        Viewer web app (Vite + TypeScript)
+cli/             Go CLI — `fernsicht run -- <command>` (no SDK, no code change)
+bridge/          Shared Go bridge embedded by the CLI + future SDKs
+frontend/        Viewer web app (Vite + TypeScript) → app.fernsicht.space
 publishers/
   python/        Python SDK (pip install fernsicht)
-PROTOCOL.md      Wire protocol and message format
+  r/             R SDK (remotes::install_github("MuteJester/Fernsicht", subdir="publishers/r"))
+PROTOCOL.md      DataChannel wire protocol
+BRIDGE_PROTOCOL.md  Bridge ↔ host process protocol
+SECURITY.md      Vulnerability disclosure policy
 ```
 
-The signaling server lives in a separate repo: [`fernsicht-server`](https://github.com/MuteJester/fernsicht-server).
+The signaling server lives in a separate repo:
+[`fernsicht-server`](https://github.com/MuteJester/fernsicht-server).
 
 ## Support Fernsicht
 

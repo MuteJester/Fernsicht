@@ -1,0 +1,10 @@
+__fernsicht__ progress 50/100
+__fernsicht__ progress 75/100 batch
+__fernsicht__ progress 33%
+__fernsicht__ progress 5
+__fernsicht__ start "Training Phase 1"
+__fernsicht__ start training
+__fernsicht__ end
+__fernsicht__ end epoch-3
+__fernsicht__ label "New Label"
+__fernsicht__ url

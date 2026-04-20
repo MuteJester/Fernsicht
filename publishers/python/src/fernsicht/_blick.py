@@ -13,45 +13,20 @@ from fernsicht._transport import Transport
 T = TypeVar("T")
 
 SERVER_URL_ENV = "FERNSICHT_SERVER_URL"
-SIGNALING_URL_ENV = "FERNSICHT_SIGNALING_URL"  # legacy alias
-SESSION_URL_ENV = "FERNSICHT_SESSION_URL"
 SESSION_API_KEY_ENV = "FERNSICHT_SESSION_API_KEY"
 DEFAULT_SERVER_URL = "https://signal.fernsicht.space"
 
 
-def _normalize_legacy_ws_url(url: str | None) -> str | None:
-    """Convert legacy wss:// signaling URLs to https:// server URLs."""
-    if not url:
-        return None
-    u = url.strip()
-    if not u:
-        return None
-    if u.startswith("wss://"):
-        u = "https://" + u[len("wss://"):]
-    elif u.startswith("ws://"):
-        u = "http://" + u[len("ws://"):]
-    # Strip trailing /ws if present
-    if u.endswith("/ws"):
-        u = u[:-3]
-    return u
+# Default cap on concurrent viewers per room. Matches the R SDK + CLI.
+DEFAULT_MAX_VIEWERS = 8
 
 
-def _normalize_max_viewers(
-    *,
-    max_viewers: int,
-    multi_viewer: int | None,
-) -> int:
-    resolved = max_viewers
-    if multi_viewer is not None:
-        if max_viewers != 1 and multi_viewer != max_viewers:
-            raise ValueError("max_viewers and multi_viewer must match when both are set")
-        resolved = multi_viewer
-
-    if isinstance(resolved, bool) or not isinstance(resolved, int):
+def _validate_max_viewers(max_viewers: int) -> int:
+    if isinstance(max_viewers, bool) or not isinstance(max_viewers, int):
         raise ValueError("max_viewers must be an integer")
-    if resolved < 1:
+    if max_viewers < 1:
         raise ValueError("max_viewers must be >= 1")
-    return resolved
+    return max_viewers
 
 
 class FernsichtBar(Generic[T]):
@@ -79,9 +54,7 @@ class FernsichtBar(Generic[T]):
         disable: bool = False,
         file: Any = None,
         server_url: str | None = None,
-        session_url: str | None = None,
-        max_viewers: int = 1,
-        multi_viewer: int | None = None,
+        max_viewers: int = DEFAULT_MAX_VIEWERS,
     ) -> None:
         self._iterable = iterable
         self._desc = desc
@@ -108,24 +81,15 @@ class FernsichtBar(Generic[T]):
             self._url = ""
             return
 
-        resolved_max_viewers = _normalize_max_viewers(
-            max_viewers=max_viewers,
-            multi_viewer=multi_viewer,
-        )
+        resolved_max_viewers = _validate_max_viewers(max_viewers)
 
         resolved_server_url = (
             server_url
             or os.getenv(SERVER_URL_ENV)
-            or _normalize_legacy_ws_url(os.getenv(SIGNALING_URL_ENV))
             or DEFAULT_SERVER_URL
         )
         resolved_api_key = os.getenv(SESSION_API_KEY_ENV)
-
-        chosen_session_url = (
-            session_url
-            or os.getenv(SESSION_URL_ENV)
-            or f"{resolved_server_url.rstrip('/')}/session"
-        )
+        chosen_session_url = f"{resolved_server_url.rstrip('/')}/session"
 
         try:
             session = create_session(
@@ -274,8 +238,7 @@ def blick(
     total: int | None = None,
     unit: str = "it",
     disable: bool = False,
-    max_viewers: int = 1,
-    multi_viewer: int | None = None,
+    max_viewers: int = DEFAULT_MAX_VIEWERS,
     **kwargs: object,
 ) -> FernsichtBar[T]:
     """Create a remote progress bar. Wrap any iterable to track it live."""
@@ -283,7 +246,6 @@ def blick(
         iterable=iterable, desc=desc, total=total, unit=unit,
         disable=disable,
         max_viewers=max_viewers,
-        multi_viewer=multi_viewer,
         **kwargs,  # type: ignore[arg-type]
     )
 
@@ -292,8 +254,7 @@ def manual(
     total: int | None = None,
     desc: str | None = None,
     unit: str = "it",
-    max_viewers: int = 1,
-    multi_viewer: int | None = None,
+    max_viewers: int = DEFAULT_MAX_VIEWERS,
     **kwargs: object,
 ) -> FernsichtBar:
     """Create a manual-update progress bar (no iterable)."""
@@ -303,6 +264,5 @@ def manual(
         total=total,
         unit=unit,
         max_viewers=max_viewers,
-        multi_viewer=multi_viewer,
         **kwargs,  # type: ignore[arg-type]
     )

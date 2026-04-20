@@ -132,6 +132,13 @@ function startViewer(serverUrl: string, roomId: string): void {
         setConnectionStatus("connecting");
       } else if (state === "connected") {
         setConnectionStatus("connected");
+        setConnectionDetail("Connected. Receiving live updates.", "info");
+      } else if (state === "disconnected") {
+        // Transient WebRTC blip — peer.ts is holding the connection
+        // open during a recovery grace window. Show a soft warning so
+        // the user knows the link degraded but we haven't given up.
+        setConnectionStatus("connecting");
+        setConnectionDetail("Connection degraded — trying to recover…", "warning");
       }
     },
   });

@@ -17,21 +17,12 @@ class SessionBootstrapError(RuntimeError):
 class SessionInfo:
     """Response from ``POST /session``.
 
-    Note on ``sender_token`` vs ``sender_secret``:
-
-    - ``sender_secret`` is the V2 authentication credential. The SDK sends
-      it as ``Authorization: Bearer`` on ``GET /poll/{room}`` and as a body
-      field on ``POST /ticket/{id}/answer``. This is the only secret that
-      actually authenticates anything on the server.
-
-    - ``sender_token`` is a V1-era HMAC token still emitted by the server
-      for backward compatibility with old clients. The V2 SDK never sends
-      it to the server; it is kept in this dataclass only because the
-      wire format still carries it. A future release may drop the field.
+    ``sender_secret`` is the authentication credential the SDK sends as
+    ``Authorization: Bearer`` on ``GET /poll/{room}`` and as a body field
+    on ``POST /ticket/{id}/answer``.
     """
 
     room_id: str
-    sender_token: str
     sender_secret: str
     viewer_url: str
     signaling_url: str
@@ -75,7 +66,6 @@ def create_session(
         raise SessionBootstrapError("session endpoint returned invalid JSON") from exc
 
     room_id = data.get("room_id")
-    sender_token = data.get("sender_token")
     sender_secret = data.get("sender_secret")
     viewer_url = data.get("viewer_url")
     signaling_url = data.get("signaling_url")
@@ -86,8 +76,6 @@ def create_session(
 
     if not isinstance(room_id, str) or not room_id:
         raise SessionBootstrapError("session response missing room_id")
-    if not isinstance(sender_token, str) or not sender_token:
-        raise SessionBootstrapError("session response missing sender_token")
     if not isinstance(sender_secret, str) or not sender_secret:
         raise SessionBootstrapError("session response missing sender_secret")
     if not isinstance(viewer_url, str) or not viewer_url:
@@ -105,7 +93,6 @@ def create_session(
 
     return SessionInfo(
         room_id=room_id,
-        sender_token=sender_token,
         sender_secret=sender_secret,
         viewer_url=viewer_url,
         signaling_url=signaling_url,
