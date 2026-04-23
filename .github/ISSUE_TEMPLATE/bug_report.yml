@@ -1,0 +1,70 @@
+name: Bug report
+description: Something's not working as expected
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. A good report makes
+        it much faster to fix — please fill in what you can.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Fernsicht is affected?
+      options:
+        - CLI (`fernsicht` binary)
+        - Python SDK (`pip install fernsicht`)
+        - R SDK
+        - Viewer (app.fernsicht.space)
+        - Bridge / internals
+        - Install script (install.sh / install.ps1)
+        - Docs
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `fernsicht --version`, or your SDK package version.
+      placeholder: "cli v0.1.2"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug — what you saw vs. what you expected to see.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal command or snippet that triggers the issue.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / shell / browser
+      description: "e.g., Ubuntu 24.04 / bash · macOS 14 / zsh · Windows 11 / PowerShell · Chrome 131"
+      placeholder: "macOS 14 / zsh"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      description: Relevant terminal output, browser console, or CI logs.
+      render: shell
+  - type: checkboxes
+    id: security-check
+    attributes:
+      label: Not a security issue
+      options:
+        - label: "This is a functional bug, not a security vulnerability. (Security reports go to thomaskon90@gmail.com per [SECURITY.md](https://github.com/MuteJester/Fernsicht/blob/main/SECURITY.md).)"
+          required: true

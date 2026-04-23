@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest a new capability or improvement
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the use case before the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you think Fernsicht could solve this. Sketches, snippets, and API shapes all help.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried or other tools that partially solve this.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part of Fernsicht?
+      options:
+        - CLI
+        - Python SDK
+        - R SDK
+        - Viewer
+        - Bridge
+        - New publisher (JavaScript / Rust / C / C++)
+        - Docs / onboarding
+        - Other
+    validations:
+      required: true

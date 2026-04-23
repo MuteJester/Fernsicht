@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security disclosure
+    url: https://github.com/MuteJester/Fernsicht/blob/main/SECURITY.md
+    about: Please do NOT open a public issue for security problems — see the disclosure policy instead.
+  - name: Live viewer app
+    url: https://app.fernsicht.space
+    about: Open a room URL here to watch progress on any device.
+  - name: Support on Ko-fi
+    url: https://ko-fi.com/fernsicht
+    about: Help keep Fernsicht growing.
