@@ -48,8 +48,10 @@ export class ViewerPeer {
   private signaling: ViewerSignaling;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private icePollTimer: ReturnType<typeof setTimeout> | null = null;
+  private iceFlushRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingICE: RTCIceCandidateInit[] = [];
+  private flushingViewerICE = false;
   private iceSendSeq = 0;
   private iceRecvSeq = 0;
   private closed = false;
@@ -93,7 +95,12 @@ export class ViewerPeer {
     if (!success) {
       this.events.onStateChange("signaling-error");
       this.events.onPhase("failed");
+      return;
     }
+
+    // ICE gathering can start before /watch returns. Drain any candidates
+    // queued while the ticket/secret were still unavailable.
+    this.flushViewerICE();
   }
 
   send(data: string): void {
@@ -112,6 +119,7 @@ export class ViewerPeer {
     this.closed = true;
     this.clearDisconnectGrace();
     this.stopKeepAlive();
+    this.stopICEFlushRetry();
     this.stopICEPoll();
     this.signaling.stop();
     this.dc?.close();
@@ -201,11 +209,39 @@ export class ViewerPeer {
   }
 
   private async flushViewerICE(): Promise<void> {
-    if (this.pendingICE.length === 0) return;
-    const batch = [...this.pendingICE];
-    this.pendingICE = [];
-    await this.signaling.postViewerICE(batch);
-    this.iceSendSeq += batch.length;
+    if (this.flushingViewerICE || this.closed) return;
+    this.flushingViewerICE = true;
+    try {
+      while (!this.closed) {
+        if (this.pendingICE.length === 0) return;
+        const batch = this.pendingICE.slice();
+        const posted = await this.signaling.postViewerICE(batch);
+        if (!posted) {
+          this.scheduleICEFlushRetry();
+          return;
+        }
+
+        this.pendingICE.splice(0, batch.length);
+        this.iceSendSeq += batch.length;
+      }
+    } finally {
+      this.flushingViewerICE = false;
+    }
+  }
+
+  private scheduleICEFlushRetry(): void {
+    if (this.closed || this.iceFlushRetryTimer !== null) return;
+    this.iceFlushRetryTimer = setTimeout(() => {
+      this.iceFlushRetryTimer = null;
+      this.flushViewerICE();
+    }, 250);
+  }
+
+  private stopICEFlushRetry(): void {
+    if (this.iceFlushRetryTimer !== null) {
+      clearTimeout(this.iceFlushRetryTimer);
+      this.iceFlushRetryTimer = null;
+    }
   }
 
   private startICEPoll(): void {
