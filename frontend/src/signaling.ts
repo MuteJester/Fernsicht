@@ -41,7 +41,9 @@ export interface ViewerSignalingEvents {
 }
 
 const VIEWER_POLL_INTERVAL_MS = 500;
-const VIEWER_POLL_MAX_ATTEMPTS = 60; // 30 seconds at 500ms
+// Keep waiting for the sender answer longer so queued viewers on slower
+// or higher-latency networks do not fail prematurely.
+const VIEWER_POLL_MAX_ATTEMPTS = 120; // 60 seconds at 500ms
 
 export class ViewerSignaling {
   private readonly baseURL: string;

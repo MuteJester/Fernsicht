@@ -65,8 +65,9 @@ const (
 	ICEGatherTimeout = 3 * time.Second
 
 	// ICEPollMaxDuration caps how long we poll for the viewer's ICE
-	// candidates. Matches Python SDK's ICE_POLL_DURATION (15s).
-	ICEPollMaxDuration = 15 * time.Second
+	// candidates. We keep this long enough for mobile handshakes that
+	// need extra NAT traversal time.
+	ICEPollMaxDuration = 30 * time.Second
 
 	// ICEPollInterval is the gap between viewer-ICE polls. Matches
 	// Python SDK's ICE_POLL_INTERVAL (500ms).

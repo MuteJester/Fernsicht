@@ -78,6 +78,12 @@ jobs:
       #   RELEASE_APP_ID         — public app identifier
       #   RELEASE_APP_PRIVATE_KEY — .pem file contents (full, incl.
       #                              BEGIN/END markers)
+      #
+      # GitHub App repository permissions required on BOTH tap repos:
+      #   - contents: write        (push branch updates)
+      #   - pull_requests: write   (open/update PRs)
+      # Missing pull_requests:write yields:
+      #   "Resource not accessible by integration" at PR creation time.
       - name: Mint GitHub App installation token
         id: app-token
         uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42  # pin v2.1.4
@@ -124,6 +130,8 @@ jobs:
           cat "tap/$DEST"
 
       - name: Open PR
+        id: open_pr
+        continue-on-error: true
         uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e  # pin v7.0.8
         with:
           path: tap
@@ -159,3 +167,14 @@ jobs:
             A maintainer may merge this PR after a drive-by review —
             nothing needs local testing; the bundled SHA256s already
             match the signed release artifacts.
+
+      - name: Explain PR creation failure (permissions)
+        if: steps.open_pr.outcome == 'failure'
+        env:
+          REPO: ${{ github.repository_owner }}/${{ matrix.tap.repo }}
+        run: |
+          echo "::error::Failed to open PR in $REPO."
+          echo "::error::Most likely cause: Fernsicht Release Bot GitHub App is missing repository permission pull_requests:write."
+          echo "::error::Required app permissions on tap repos: contents:write + pull_requests:write."
+          echo "::error::After changing app permissions, re-run this workflow for the same release."
+          exit 1

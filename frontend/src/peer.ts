@@ -27,7 +27,8 @@ const STUN_SERVERS: RTCIceServer[] = [
 const KEEPALIVE_INTERVAL_MS = 20_000;
 const DATACHANNEL_LABEL = "fernsicht";
 const ICE_POLL_INTERVAL_MS = 500;
-const ICE_POLL_MAX_ROUNDS = 30; // 15 seconds
+// Allow a longer ICE exchange window for slower mobile handshakes.
+const ICE_POLL_MAX_ROUNDS = 60; // 30 seconds
 
 // How long to allow the peer-connection to sit in WebRTC's transient
 // "disconnected" state before treating it as a real failure. Mobile

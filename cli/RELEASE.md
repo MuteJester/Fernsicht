@@ -306,7 +306,7 @@ rotation schedule + break-glass procedure:
 | Secret | Used by | Scope | Rotation | Break-glass |
 |---|---|---|---|---|
 | `RELEASE_APP_ID` | `brew-scoop-pr.yml` | Public app ID (not a secret, but stored for convenience) | — | — |
-| `RELEASE_APP_PRIVATE_KEY` | `brew-scoop-pr.yml` | GitHub App private key (`.pem`); mints installation tokens scoped to tap repos only | **Every 12 months.** New key via Settings → Developer settings → GitHub Apps → Fernsicht Release Bot → "Generate a private key". | Uninstall app from `homebrew-fernsicht` + `scoop-fernsicht` immediately. |
+| `RELEASE_APP_PRIVATE_KEY` | `brew-scoop-pr.yml` | GitHub App private key (`.pem`); mints installation tokens scoped to tap repos only. App must have repo permissions `contents:write` + `pull_requests:write` on both tap repos. | **Every 12 months.** New key via Settings → Developer settings → GitHub Apps → Fernsicht Release Bot → "Generate a private key". | Uninstall app from `homebrew-fernsicht` + `scoop-fernsicht` immediately. |
 | `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` | `cli-docker.yml` | Docker Hub push access (username public; token is a `dckr_pat_*`) | **Every 90 days.** New token via Docker Hub → Account Settings → Security. | Revoke token in Docker Hub UI; push to GHCR still works (separate auth via `GITHUB_TOKEN`). |
 | `GITHUB_TOKEN` | All workflows | Ephemeral per-job token minted by Actions | N/A (per-run) | N/A |
 
@@ -354,10 +354,15 @@ Each release also publishes:
 
 ### One-time tap setup (maintainer)
 
-The release workflow renders `fernsicht.rb` + `fernsicht.json` and
-attaches them as release assets. Maintainers copy them into the tap
-repos manually per release; an auto-PR workflow may replace this
-step in a future release.
+`brew-scoop-pr.yml` now opens PRs to both tap repos automatically
+after a successful stable `cli/v*` release. The app installation must
+cover `homebrew-fernsicht` and `scoop-fernsicht` with repository
+permissions `contents:write` + `pull_requests:write`.
+
+If tap PR automation fails, use the fallback:
+- re-run `brew-scoop-pr.yml` for the release run, or
+- copy rendered release assets (`fernsicht.rb`, `fernsicht.json`)
+  into tap repos manually.
 
 See [`dist-templates/README.md`](dist-templates/README.md) for the
 first-ever tap repo creation steps.
