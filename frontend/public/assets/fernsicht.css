@@ -1338,6 +1338,14 @@
 .stepper li.is-done  .label{ color: var(--ink-2); }
 .stepper li.is-active .label{ color: var(--ink); }
 .stepper .timing{ color: var(--ink-5); font-size: 10.5px; letter-spacing: 0.08em; }
+.stepper-note{
+  margin: 10px 0 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-4);
+  line-height: 1.55;
+}
 
 /* ── Viewer list ────────────────────────────────────────────────── */
 .viewers-list{

@@ -194,16 +194,22 @@ const STEP_ORDER: ConnectionPhase[] = [
 ];
 
 const SENDER_POLL_HINT_SEC = 25;
-let countdownTimer: ReturnType<typeof setInterval> | null = null;
-let countdownRemaining = SENDER_POLL_HINT_SEC;
+const CONTACTING_SOFT_HINT_SEC = 12;
+const QUEUED_SOFT_HINT_SEC = 60;
+const NEGOTIATING_SOFT_HINT_SEC = 30;
+let phaseLiveTicker: ReturnType<typeof setInterval> | null = null;
+let activePhase: ConnectionPhase | null = null;
+let activePhaseStartedAt = 0;
 const phaseTimestamps = new Map<ConnectionPhase, number>();
 
 export function setConnectionPhase(phase: ConnectionPhase): void {
-  stopCountdown();
+  stopPhaseLiveTicker();
 
   const steps = el.handshake().children;
 
   if (phase === "failed") {
+    activePhase = null;
+    activePhaseStartedAt = 0;
     // Mark whichever step is active as failed, leave the rest.
     for (const step of Array.from(steps)) {
       if (step.classList.contains("is-active")) {
@@ -213,6 +219,7 @@ export function setConnectionPhase(phase: ConnectionPhase): void {
         if (t) t.textContent = "failed";
       }
     }
+    if (!activeTaskId) el.taskBadge().textContent = "Failed";
     logEvent("handshake failed");
     return;
   }
@@ -221,6 +228,8 @@ export function setConnectionPhase(phase: ConnectionPhase): void {
   if (!phaseTimestamps.has(phase)) {
     phaseTimestamps.set(phase, performance.now());
   }
+  activePhase = phase;
+  activePhaseStartedAt = Date.now();
 
   const idx = STEP_ORDER.indexOf(phase);
   if (idx < 0) return;
@@ -235,7 +244,7 @@ export function setConnectionPhase(phase: ConnectionPhase): void {
       if (t) t.textContent = formatPhaseTiming(STEP_ORDER[i]);
     } else if (i === idx) {
       step.classList.add("is-active");
-      if (t) t.textContent = phase === "queued" ? "" : formatPhaseTiming(phase);
+      if (t) t.textContent = formatLivePhaseTiming(phase, 0);
     } else {
       if (t) t.textContent = "";
     }
@@ -255,7 +264,14 @@ export function setConnectionPhase(phase: ConnectionPhase): void {
     }
   }
 
-  if (phase === "queued") startQueuedCountdown();
+  if (!activeTaskId) {
+    updateConnectingBadge(phase, 0);
+    updateConnectingSubtitle(phase, 0);
+  }
+
+  if (phase === "contacting-server" || phase === "queued" || phase === "negotiating") {
+    startPhaseLiveTicker();
+  }
 }
 
 function formatPhaseTiming(phase: ConnectionPhase): string {
@@ -266,29 +282,106 @@ function formatPhaseTiming(phase: ConnectionPhase): string {
   return `+ ${(ms / 1000).toFixed(1)} s`;
 }
 
-function startQueuedCountdown(): void {
-  countdownRemaining = SENDER_POLL_HINT_SEC;
-  renderCountdown();
-  countdownTimer = setInterval(() => {
-    countdownRemaining -= 1;
-    if (countdownRemaining <= 0) countdownRemaining = SENDER_POLL_HINT_SEC;
-    renderCountdown();
-  }, 1000);
-}
-
-function renderCountdown(): void {
-  // Display the countdown in the queued step's timing slot.
-  const queuedStep = el.handshake().children[1] as HTMLElement | undefined;
-  if (!queuedStep) return;
-  const t = queuedStep.querySelector<HTMLElement>(".timing");
-  if (t) t.textContent = `next check-in ${countdownRemaining}s`;
-}
-
-function stopCountdown(): void {
-  if (countdownTimer !== null) {
-    clearInterval(countdownTimer);
-    countdownTimer = null;
+function formatLivePhaseTiming(phase: ConnectionPhase, elapsedSec: number): string {
+  switch (phase) {
+    case "contacting-server":
+      if (elapsedSec < CONTACTING_SOFT_HINT_SEC) return `waiting ${formatDuration(elapsedSec)}`;
+      return `waiting ${formatDuration(elapsedSec)} · slow network`;
+    case "queued":
+      return `wait ${formatDuration(elapsedSec)} · next ~${secondsUntilNextSenderPoll(elapsedSec)}s`;
+    case "negotiating": {
+      const remain = Math.max(0, NEGOTIATING_SOFT_HINT_SEC - elapsedSec);
+      if (remain > 0) return `wait ${formatDuration(elapsedSec)} · ice ${remain}s`;
+      return `wait ${formatDuration(elapsedSec)} · still probing`;
+    }
+    case "connected":
+      return formatPhaseTiming(phase);
+    case "failed":
+      return "failed";
   }
+}
+
+function secondsUntilNextSenderPoll(elapsedSec: number): number {
+  const rem = SENDER_POLL_HINT_SEC - (elapsedSec % SENDER_POLL_HINT_SEC);
+  return rem === 0 ? SENDER_POLL_HINT_SEC : rem;
+}
+
+function updateConnectingBadge(phase: ConnectionPhase, elapsedSec: number): void {
+  if (activeTaskId) return;
+  switch (phase) {
+    case "contacting-server":
+      el.taskBadge().textContent = `Connecting ${formatDuration(elapsedSec)}`;
+      break;
+    case "queued":
+      el.taskBadge().textContent = `Queued ${formatDuration(elapsedSec)}`;
+      break;
+    case "negotiating":
+      el.taskBadge().textContent = `Negotiating ${formatDuration(elapsedSec)}`;
+      break;
+    case "connected":
+      el.taskBadge().textContent = "Connected";
+      break;
+    case "failed":
+      el.taskBadge().textContent = "Failed";
+      break;
+  }
+}
+
+function updateConnectingSubtitle(phase: ConnectionPhase, elapsedSec: number): void {
+  if (activeTaskId) return;
+  switch (phase) {
+    case "contacting-server":
+      if (elapsedSec < CONTACTING_SOFT_HINT_SEC) {
+        el.taskSub().textContent = `Reaching rendezvous server · ${formatDuration(elapsedSec)} elapsed`;
+      } else {
+        el.taskSub().textContent = `Still reaching server · ${formatDuration(elapsedSec)} elapsed · keep page open`;
+      }
+      break;
+    case "queued": {
+      const nextPoll = secondsUntilNextSenderPoll(elapsedSec);
+      let msg = `Waiting for sender check-in · ${formatDuration(elapsedSec)} elapsed · next poll ~${nextPoll}s`;
+      if (elapsedSec >= QUEUED_SOFT_HINT_SEC) msg += " · still retrying";
+      el.taskSub().textContent = msg;
+      break;
+    }
+    case "negotiating": {
+      let msg = `Negotiating peer-to-peer path · ${formatDuration(elapsedSec)} elapsed`;
+      if (elapsedSec >= NEGOTIATING_SOFT_HINT_SEC) msg += " · trying tougher NAT routes";
+      el.taskSub().textContent = msg;
+      break;
+    }
+    case "connected":
+      el.taskSub().textContent = "Connected. Waiting for first frame…";
+      break;
+    case "failed":
+      break;
+  }
+}
+
+function startPhaseLiveTicker(): void {
+  renderPhaseLiveTick();
+  phaseLiveTicker = setInterval(renderPhaseLiveTick, 1000);
+}
+
+function stopPhaseLiveTicker(): void {
+  if (phaseLiveTicker !== null) {
+    clearInterval(phaseLiveTicker);
+    phaseLiveTicker = null;
+  }
+}
+
+function renderPhaseLiveTick(): void {
+  if (!activePhase || activeTaskId || activePhaseStartedAt === 0) return;
+  const idx = STEP_ORDER.indexOf(activePhase);
+  if (idx < 0) return;
+
+  const elapsedSec = Math.max(0, Math.floor((Date.now() - activePhaseStartedAt) / 1000));
+  const step = el.handshake().children[idx] as HTMLElement | undefined;
+  const timing = step?.querySelector<HTMLElement>(".timing");
+  if (timing) timing.textContent = formatLivePhaseTiming(activePhase, elapsedSec);
+
+  updateConnectingBadge(activePhase, elapsedSec);
+  updateConnectingSubtitle(activePhase, elapsedSec);
 }
 
 // --- Observation (single active task) -------------------------------------

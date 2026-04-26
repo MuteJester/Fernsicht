@@ -50,7 +50,7 @@ function startViewer(serverUrl: string, roomId: string): void {
   showViewerView();
   setRoomId(roomId);
   setConnectionStatus("connecting");
-  setConnectionDetail("Reaching the rendezvous server…", "info");
+  setConnectionDetail("Reaching the rendezvous server… this usually takes a few seconds.", "info");
   setConnectionPhase("contacting-server");
   logEvent(`session <b>opened</b> · room ${roomId.slice(0, 8)}`);
 
@@ -71,23 +71,23 @@ function startViewer(serverUrl: string, roomId: string): void {
       setConnectionPhase(phase);
       switch (phase) {
         case "contacting-server":
-          setConnectionDetail("Reaching the rendezvous server…", "info");
+          setConnectionDetail("Reaching the rendezvous server… this usually takes a few seconds.", "info");
           break;
         case "queued":
           setConnectionDetail(
-            "Waiting for the sender to pick up your handshake…", "info");
+            "Waiting for sender check-in… auto-retrying in the background. No need to refresh.", "info");
           logEvent("ticket <b>queued</b> · waiting for sender poll");
           break;
         case "negotiating":
-          setConnectionDetail("Negotiating peer-to-peer connection…", "info");
+          setConnectionDetail("Negotiating peer-to-peer path… keep this tab open while ICE completes.", "info");
           logEvent("offer / answer <b>exchanged</b>");
           break;
         case "connected":
-          setConnectionDetail("Connected. Waiting for first frame…", "info");
+          setConnectionDetail("Connected. Waiting for first progress frame…", "info");
           logEvent("direct channel <b>open</b>");
           break;
         case "failed":
-          setConnectionDetail("Connection failed. Try refreshing.", "error");
+          setConnectionDetail("Connection setup failed after retries. Refresh once to request a new ticket.", "error");
           break;
       }
     },
@@ -129,7 +129,7 @@ function startViewer(serverUrl: string, roomId: string): void {
     },
     onClose: () => {
       setConnectionStatus("disconnected");
-      setConnectionDetail("Disconnected.", "warning");
+      setConnectionDetail("Disconnected. If it does not recover in a few seconds, refresh once.", "warning");
       logEvent("connection <b>closed</b>");
       // Safety net: if the sender closed the DataChannel without an
       // explicit END frame but the task had effectively completed,
@@ -144,7 +144,7 @@ function startViewer(serverUrl: string, roomId: string): void {
         setConnectionDetail("Connected. Receiving live updates.", "info");
       } else if (state === "disconnected") {
         setConnectionStatus("connecting");
-        setConnectionDetail("Connection degraded — trying to recover…", "warning");
+        setConnectionDetail("Connection degraded — auto-recovering (up to ~30s)…", "warning");
         logEvent("connection <em>degraded</em> · waiting on recovery");
       }
     },
