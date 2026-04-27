@@ -247,7 +247,7 @@ jobs:
           head -20 "../license-reports/licenses-${{ matrix.component }}.csv" || true
 
       - name: Upload license manifest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pin v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # pin v7.0.1
         with:
           name: licenses-${{ matrix.component }}
           path: license-reports/licenses-${{ matrix.component }}.csv
@@ -292,7 +292,7 @@ jobs:
           fi
 
       - name: Upload license manifest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pin v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # pin v7.0.1
         with:
           name: licenses-python
           path: license-reports/licenses-python.csv
