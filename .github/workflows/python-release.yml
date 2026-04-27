@@ -207,7 +207,7 @@ jobs:
         # No `password` / `user` / `api-token` — the action mints an
         # OIDC token from the id-token: write permission and exchanges
         # it with PyPI for a short-lived upload token.
-        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc  # pin v1.12.4
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # pin v1.14.0
         with:
           # Only distribution files (wheel + sdist) live in dist/. The
           # SBOM is in a separate sbom/ dir so it doesn't get uploaded
